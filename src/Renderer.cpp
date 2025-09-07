@@ -1,12 +1,16 @@
 #include "pch.h"
 #include "DirectXHelper.h"
 #include "Renderer.h"
+#include "shaders/SimplePS.h"
+#include "shaders/SimpleVS.h"
 
 Renderer::~Renderer() {
 	_WaitForPreviousFrame();
 }
 
 bool Renderer::Initialize(HWND hwndAttach, UINT width, UINT height) noexcept {
+	UINT dxgiFactoryFlags = 0;
+
 #ifdef _DEBUG
 	{
 		winrt::com_ptr<ID3D12Debug> debugController;
@@ -15,13 +19,11 @@ bool Renderer::Initialize(HWND hwndAttach, UINT width, UINT height) noexcept {
 		}
 	}
 
-	UINT flag = DXGI_CREATE_FACTORY_DEBUG;
-#else
-	UINT flag = 0;
+	dxgiFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
 #endif
 
 	winrt::com_ptr<IDXGIFactory7> dxgiFactory;
-	if (FAILED(CreateDXGIFactory2(flag, IID_PPV_ARGS(&dxgiFactory)))) {
+	if (FAILED(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&dxgiFactory)))) {
 		return false;
 	}
 
@@ -130,6 +132,44 @@ bool Renderer::Initialize(HWND hwndAttach, UINT width, UINT height) noexcept {
 	}
 
 	if (FAILED(_fenceEvent.create())) {
+		return false;
+	}
+
+	{
+		CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(0, nullptr, 0, nullptr,
+			D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+		winrt::com_ptr<ID3DBlob> signature;
+		winrt::com_ptr<ID3DBlob> error;
+		if (FAILED(D3D12SerializeRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, signature.put(), error.put()))) {
+			return false;
+		}
+		if (FAILED(_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&_rootSignature)))) {
+			return false;
+		}
+	}
+
+	// Define the vertex input layout.
+	D3D12_INPUT_ELEMENT_DESC inputElementDescs[] =
+	{
+		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+	};
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {
+		.pRootSignature = _rootSignature.get(),
+		.VS = CD3DX12_SHADER_BYTECODE(SimpleVS, sizeof(SimpleVS)),
+		.PS = CD3DX12_SHADER_BYTECODE(SimplePS, sizeof(SimplePS)),
+		.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT),
+		.SampleMask = UINT_MAX,
+		.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT),
+		.InputLayout = { inputElementDescs, _countof(inputElementDescs) },
+		.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
+		.NumRenderTargets = 1,
+		.RTVFormats = { DXGI_FORMAT_R8G8B8A8_UNORM },
+		.SampleDesc = { .Count = 1 }
+	};
+	if (FAILED(_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&_pipelineState)))) {
 		return false;
 	}
 

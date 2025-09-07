@@ -31,4 +31,7 @@ private:
 	wil::unique_event_nothrow _fenceEvent;
 	UINT64 _fenceValue = 0;
 	UINT _frameIndex = 0;
+
+	winrt::com_ptr<ID3D12RootSignature> _rootSignature;
+	winrt::com_ptr<ID3D12PipelineState> _pipelineState;
 };
