@@ -38,15 +38,22 @@ bool MainWindow::Create() noexcept {
 		return false;
 	}
 
-	RECT clientRect;
-	GetClientRect(Handle(), &clientRect);
+	const long clientWidth = std::lroundf(_dpiScale * 900);
+	const long clientHeight = std::lroundf(_dpiScale * 600);
+	{
+		RECT windowRect{ 0,0,clientWidth,clientHeight };
+		AdjustWindowRectExForDpi(&windowRect, WS_OVERLAPPEDWINDOW, FALSE, 0,
+			(UINT)std::lroundf(_dpiScale * USER_DEFAULT_SCREEN_DPI));
+		SetWindowPos(Handle(), NULL, 0, 0, windowRect.right - windowRect.left, windowRect.bottom - windowRect.top,
+			SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOZORDER);
+	}
 
-	if (!_renderer.Initialize(Handle(),
-		clientRect.right - clientRect.left, clientRect.bottom - clientRect.top)) {
+	_renderer.emplace();
+	if (!_renderer->Initialize(Handle(), clientWidth, clientHeight, _dpiScale)) {
 		return false;
 	}
 
-	if (!_renderer.Render()) {
+	if (!_renderer->Render()) {
 		return false;
 	}
 
@@ -67,7 +74,7 @@ int MainWindow::MessageLoop() noexcept {
 			DispatchMessage(&msg);
 		}
 
-		if (!_renderer.Render()) {
+		if (!_renderer->Render()) {
 			PostQuitMessage(1);
 		}
 	}
@@ -79,6 +86,48 @@ LRESULT MainWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) noex
 	{
 		const DWORD attributes = WTNCA_NODRAWICON | WTNCA_NOSYSMENU;
 		SetWindowThemeNonClientAttributes(Handle(), attributes, attributes);
+
+		_dpiScale = GetDpiForWindow(Handle()) / float(USER_DEFAULT_SCREEN_DPI);
+
+		return 0;
+	}
+	case WM_DPICHANGED:
+	{
+		_dpiScale = HIWORD(wParam) / float(USER_DEFAULT_SCREEN_DPI);
+
+		RECT* newRect = (RECT*)lParam;
+		SetWindowPos(
+			Handle(),
+			NULL,
+			newRect->left,
+			newRect->top,
+			newRect->right - newRect->left,
+			newRect->bottom - newRect->top,
+			SWP_NOZORDER | SWP_NOACTIVATE
+		);
+
+		return 0;
+	}
+	case WM_GETMINMAXINFO:
+	{
+		// 设置窗口最小尺寸
+		const long minClientSize = std::lroundf(400 * _dpiScale);
+		RECT windowRect{ 0,0,minClientSize,minClientSize };
+		AdjustWindowRectExForDpi(&windowRect, WS_OVERLAPPEDWINDOW, FALSE, 0,
+			(UINT)std::lroundf(_dpiScale * USER_DEFAULT_SCREEN_DPI));
+
+		((MINMAXINFO*)lParam)->ptMinTrackSize = {
+			windowRect.right - windowRect.left,
+			windowRect.bottom - windowRect.top
+		};
+
+		return 0;
+	}
+	case WM_SIZE:
+	{
+		if (wParam != SIZE_MINIMIZED && _renderer) {
+			_renderer->Resize(LOWORD(lParam), HIWORD(lParam), _dpiScale);
+		}
 		return 0;
 	}
 	case WM_DESTROY:

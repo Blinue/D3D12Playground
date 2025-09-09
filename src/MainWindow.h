@@ -15,5 +15,6 @@ protected:
 	LRESULT _MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) noexcept;
 
 private:
-	Renderer _renderer;
+	std::optional<Renderer> _renderer;
+	float _dpiScale = 1.0f;
 };
