@@ -32,6 +32,22 @@ bool Renderer::Initialize(HWND hwndAttach, uint32_t width, uint32_t height, floa
 		return false;
 	}
 
+	if (winrt::com_ptr<ID3D12InfoQueue> infoQueue = _device.try_as<ID3D12InfoQueue>()) {
+		D3D12_MESSAGE_ID denyIds[] = {
+			D3D12_MESSAGE_ID_CLEARRENDERTARGETVIEW_MISMATCHINGCLEARVALUE,
+			D3D12_MESSAGE_ID_REFLECTSHAREDPROPERTIES_INVALIDOBJECT
+		};
+
+		D3D12_INFO_QUEUE_FILTER filter = {
+			.DenyList = {
+				.NumIDs = (UINT)std::size(denyIds),
+				.pIDList = denyIds
+			}
+		};
+
+		infoQueue->AddStorageFilterEntries(&filter);
+	}
+
 	{
 		D3D12_COMMAND_QUEUE_DESC queueDesc{
 			.Type = D3D12_COMMAND_LIST_TYPE_DIRECT,
@@ -126,8 +142,9 @@ bool Renderer::Initialize(HWND hwndAttach, uint32_t width, uint32_t height, floa
 
 bool Renderer::Render() noexcept {
 	winrt::com_ptr<ID3D12Resource> frameTex;
+	D3D12_RESOURCE_STATES texState;
 	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle;
-	_presenter->BeginFrame(frameTex, rtvHandle);
+	_presenter->BeginFrame(frameTex, texState, rtvHandle);
 
 	HRESULT hr = _commandAllocator->Reset();
 	if (FAILED(hr)) {
@@ -144,7 +161,7 @@ bool Renderer::Render() noexcept {
 
 	{
 		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			frameTex.get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+			frameTex.get(), texState, D3D12_RESOURCE_STATE_RENDER_TARGET);
 		_commandList->ResourceBarrier(1, &barrier);
 	}
 
@@ -161,7 +178,7 @@ bool Renderer::Render() noexcept {
 	
 	{
 		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			frameTex.get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+			frameTex.get(), D3D12_RESOURCE_STATE_RENDER_TARGET, texState);
 		_commandList->ResourceBarrier(1, &barrier);
 	}
 
@@ -184,7 +201,7 @@ bool Renderer::Resize(uint32_t width, uint32_t height, float dpiScale) noexcept 
 		return true;
 	}
 
-	if (!_presenter->Resize(_device.get(), width, height)) {
+	if (!_presenter->Resize(width, height, true)) {
 		return false;
 	}
 
