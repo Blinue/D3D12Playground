@@ -22,7 +22,7 @@ public:
 		CD3DX12_CPU_DESCRIPTOR_HANDLE& rtvHandle
 	) noexcept;
 
-	void EndFrame(bool waitForRenderComplete = false) noexcept;
+	void EndFrame(bool waitForGpu = false) noexcept;
 
 	bool Resize(ID3D12Device5* device, uint32_t width, uint32_t height) noexcept;
 
@@ -30,6 +30,9 @@ private:
 	bool _WaitForGpu() noexcept;
 
 	bool _LoadSizeDependentResources(ID3D12Device5* device) noexcept;
+
+	// 和 DwmFlush 效果相同但更准确
+	static void _WaitForDwmComposition() noexcept;
 
 	ID3D12CommandQueue* _commandQueue = nullptr;
 
@@ -45,5 +48,6 @@ private:
 	wil::unique_event_nothrow _fenceEvent;
 	UINT64 _fenceValue = 0;
 
+	bool _isResized = false;
 	bool _isframeLatencyWaited = false;
 };

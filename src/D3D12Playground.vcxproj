@@ -71,7 +71,7 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>UxTheme.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>UxTheme.lib;Dwmapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <FxCompile>
       <ShaderModel>5.0</ShaderModel>
@@ -118,6 +118,7 @@
     </ClCompile>
     <ClCompile Include="Presenter.cpp" />
     <ClCompile Include="Renderer.cpp" />
+    <ClCompile Include="Win32Helper.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="DirectXHelper.h" />
@@ -125,6 +126,7 @@
     <ClInclude Include="pch.h" />
     <ClInclude Include="Presenter.h" />
     <ClInclude Include="Renderer.h" />
+    <ClInclude Include="Win32Helper.h" />
     <ClInclude Include="WindowBase.h" />
   </ItemGroup>
   <ItemGroup>
