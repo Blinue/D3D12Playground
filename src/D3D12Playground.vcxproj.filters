@@ -6,6 +6,7 @@
     <ClCompile Include="pch.cpp" />
     <ClCompile Include="DirectXHelper.cpp" />
     <ClCompile Include="Renderer.cpp" />
+    <ClCompile Include="Presenter.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Manifest Include="app.manifest" />
@@ -16,6 +17,7 @@
     <ClInclude Include="WindowBase.h" />
     <ClInclude Include="DirectXHelper.h" />
     <ClInclude Include="Renderer.h" />
+    <ClInclude Include="Presenter.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="HybridCRT.props" />

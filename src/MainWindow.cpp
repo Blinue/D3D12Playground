@@ -123,11 +123,24 @@ LRESULT MainWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) noex
 
 		return 0;
 	}
-	case WM_SIZE:
+	case WM_NCCALCSIZE:
 	{
-		if (wParam != SIZE_MINIMIZED && _renderer) {
-			_renderer->Resize(LOWORD(lParam), HIWORD(lParam), _dpiScale);
+		if (!wParam) {
+			return 0;
 		}
+
+		LRESULT ret = DefWindowProc(Handle(), WM_NCCALCSIZE, wParam, lParam);
+		if (ret != 0) {
+			return ret;
+		}
+
+		if (_renderer) {
+			NCCALCSIZE_PARAMS& params = *(NCCALCSIZE_PARAMS*)lParam;
+			// 此时第一个成员是新窗口矩形
+			const RECT& clientRect = params.rgrc[0];
+			_renderer->Resize(clientRect.right - clientRect.left, clientRect.bottom - clientRect.top, _dpiScale);
+		}
+
 		return 0;
 	}
 	case WM_DESTROY:
