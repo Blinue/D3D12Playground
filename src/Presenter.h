@@ -24,16 +24,16 @@ public:
 
 	void EndFrame(bool waitForGpu = false) noexcept;
 
-	bool Resize(ID3D12Device5* device, uint32_t width, uint32_t height) noexcept;
+	bool Resize(uint32_t width, uint32_t height) noexcept;
 
 private:
 	bool _WaitForGpu() noexcept;
 
-	bool _LoadSizeDependentResources(ID3D12Device5* device) noexcept;
+	bool _LoadSizeDependentResources() noexcept;
 
-	// 和 DwmFlush 效果相同但更准确
 	static void _WaitForDwmComposition() noexcept;
 
+	ID3D12Device* _device = nullptr;
 	ID3D12CommandQueue* _commandQueue = nullptr;
 
 	winrt::com_ptr<IDXGISwapChain4> _swapChain;

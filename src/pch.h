@@ -32,6 +32,13 @@
 #include <restrictederrorinfo.h>
 #include <hstring.h>
 #include <winrt/base.h>
+#include <winrt/Windows.Graphics.Display.h>
+#include <winrt/Windows.System.h>
+
+namespace winrt {
+using namespace Windows::Graphics::Display;
+using namespace Windows::System;
+}
 
 using namespace std::string_literals;
 using namespace std::string_view_literals;

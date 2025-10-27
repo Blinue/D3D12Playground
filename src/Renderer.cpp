@@ -84,7 +84,7 @@ bool Renderer::Initialize(HWND hwndAttach, uint32_t width, uint32_t height, floa
 		},
 		.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
 		.NumRenderTargets = 1,
-		.RTVFormats = { DXGI_FORMAT_R8G8B8A8_UNORM },
+		.RTVFormats = { DXGI_FORMAT_R8G8B8A8_UNORM_SRGB },
 		.SampleDesc = { .Count = 1 }
 	};
 	if (FAILED(_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&_pipelineState)))) {
@@ -151,7 +151,7 @@ bool Renderer::Render() noexcept {
 	_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
 	{
-		const float clearColor[] = { 0.9f, 0.9f, 0.8f, 1.0f };
+		const float clearColor[] = { 0.8f, 0.8f, 0.6f, 1.0f };
 		_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
 	}
 
@@ -184,7 +184,7 @@ bool Renderer::Resize(uint32_t width, uint32_t height, float dpiScale) noexcept 
 		return true;
 	}
 
-	if (!_presenter->Resize(_device.get(), width, height)) {
+	if (!_presenter->Resize(width, height)) {
 		return false;
 	}
 

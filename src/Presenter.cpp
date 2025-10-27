@@ -16,6 +16,7 @@ bool Presenter::Initialize(
 	uint32_t width,
 	uint32_t height
 ) noexcept {
+	_device = device;
 	_commandQueue = commandQueue;
 
 	DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {
@@ -85,7 +86,7 @@ bool Presenter::Initialize(
 		return false;
 	}
 	
-	return _LoadSizeDependentResources(device);
+	return _LoadSizeDependentResources();
 }
 
 bool Presenter::BeginFrame(
@@ -140,7 +141,7 @@ void Presenter::EndFrame(bool waitForGpu) noexcept {
 	_frameIndex = _swapChain->GetCurrentBackBufferIndex();
 }
 
-bool Presenter::Resize(ID3D12Device5* device, uint32_t width, uint32_t height) noexcept {
+bool Presenter::Resize(uint32_t width, uint32_t height) noexcept {
 	_isResized = true;
 
 	if (!_isframeLatencyWaited) {
@@ -160,10 +161,14 @@ bool Presenter::Resize(ID3D12Device5* device, uint32_t width, uint32_t height) n
 
 	_frameIndex = _swapChain->GetCurrentBackBufferIndex();
 
-	return _LoadSizeDependentResources(device);
+	return _LoadSizeDependentResources();
 }
 
 bool Presenter::_WaitForGpu() noexcept {
+	if (!_fence) {
+		return true;
+	}
+
 	UINT64 newFenceValue = _fenceValue + 1;
 	HRESULT hr = _commandQueue->Signal(_fence.get(), newFenceValue);
 	if (FAILED(hr)) {
@@ -184,19 +189,25 @@ bool Presenter::_WaitForGpu() noexcept {
 	return true;
 }
 
-bool Presenter::_LoadSizeDependentResources(ID3D12Device5* device) noexcept {
+bool Presenter::_LoadSizeDependentResources() noexcept {
 	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(_rtvHeap->GetCPUDescriptorHandleForHeapStart());
 	for (UINT i = 0; i < (UINT)_renderTargets.size(); ++i) {
 		if (FAILED(_swapChain->GetBuffer(i, IID_PPV_ARGS(&_renderTargets[i])))) {
 			return false;
 		}
-		device->CreateRenderTargetView(_renderTargets[i].get(), nullptr, rtvHandle);
+
+		D3D12_RENDER_TARGET_VIEW_DESC rtvDesc = {
+			.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
+			.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D
+		};
+		_device->CreateRenderTargetView(_renderTargets[i].get(), &rtvDesc, rtvHandle);
 		rtvHandle.Offset(1, _rtvDescriptorSize);
 	}
 
 	return true;
 }
 
+// 和 DwmFlush 效果相同但更准确
 void Presenter::_WaitForDwmComposition() noexcept {
 	// Win11 可以使用准确的 DCompositionWaitForCompositorClock
 	if (Win32Helper::GetOSVersion().IsWin11()) {

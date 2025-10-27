@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "MainWindow.h"
 #include <Uxtheme.h>
+// #include <dispatcherqueue.h>
+// #include <windows.graphics.display.interop.h>
 
 bool MainWindow::Create() noexcept {
 	static const wchar_t* MAIN_WINDOW_CLASS_NAME = L"D3D12Playground_Main";
@@ -47,6 +49,29 @@ bool MainWindow::Create() noexcept {
 		SetWindowPos(Handle(), NULL, 0, 0, windowRect.right - windowRect.left, windowRect.bottom - windowRect.top,
 			SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOZORDER);
 	}
+
+	/*winrt::init_apartment(winrt::apartment_type::single_threaded);
+
+	// DisplayInformation 需要 DispatcherQueue
+	winrt::DispatcherQueueController dqc{ nullptr };
+	HRESULT hr = CreateDispatcherQueueController(
+		DispatcherQueueOptions{
+			.dwSize = sizeof(DispatcherQueueOptions),
+			.threadType = DQTYPE_THREAD_CURRENT
+		},
+		(PDISPATCHERQUEUECONTROLLER*)winrt::put_abi(dqc)
+	);
+	if (FAILED(hr)) {
+		return 1;
+	}
+
+	winrt::com_ptr<IDisplayInformationStaticsInterop> interop =
+		winrt::get_activation_factory<winrt::DisplayInformation, IDisplayInformationStaticsInterop>();
+	if (FAILED(interop->GetForWindow(Handle(), winrt::guid_of<winrt::DisplayInformation>(), winrt::put_abi(_displayInfo)))) {
+		return false;
+	}
+
+	auto ac = _displayInfo.GetAdvancedColorInfo();*/
 
 	_renderer.emplace();
 	if (!_renderer->Initialize(Handle(), clientWidth, clientHeight, _dpiScale)) {
