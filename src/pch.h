@@ -32,10 +32,12 @@
 #include <restrictederrorinfo.h>
 #include <hstring.h>
 #include <winrt/base.h>
+#include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Graphics.Display.h>
 #include <winrt/Windows.System.h>
 
 namespace winrt {
+using namespace Windows::Foundation;
 using namespace Windows::Graphics::Display;
 using namespace Windows::System;
 }

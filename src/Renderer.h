@@ -26,11 +26,11 @@ private:
 
 	bool _LoadSizeDependentResources(uint32_t width, uint32_t height, float dpiScale) noexcept;
 
-	bool _BuildPSO() noexcept;
+	bool _InitializeDisplayInformation() noexcept;
 
 	void _UpdateAdvancedColorInfo() noexcept;
 
-	void _UpdateMainWindowTitle() const noexcept;
+	bool _UpdateAdvancedColor(bool onInit = false) noexcept;
 
 	struct _Vertex {
 		DirectX::XMFLOAT2 position;
@@ -55,6 +55,8 @@ private:
 	std::optional<Presenter> _presenter;
 
 	HWND _hwndMain = NULL;
+	winrt::DisplayInformation _displayInfo{ nullptr };
+	winrt::DisplayInformation::AdvancedColorInfoChanged_revoker _acInfoChangedRevoker;
 	HMONITOR _hCurMonitor = NULL;
 	winrt::AdvancedColorKind _curAcKind = winrt::AdvancedColorKind::StandardDynamicRange;
 	// HDR 模式下最大亮度缩放

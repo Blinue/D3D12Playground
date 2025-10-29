@@ -4,6 +4,9 @@
 #include "shaders/sRGB_PS.h"
 #include "shaders/AdvancedColor_PS.h"
 #include "shaders/SimpleVS.h"
+#include "Win32Helper.h"
+#include <dispatcherqueue.h>
+#include <windows.graphics.display.interop.h>
 
 Renderer::~Renderer() {
 	// 等待 GPU
@@ -27,9 +30,6 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 		return false;
 	}
 
-	_UpdateAdvancedColorInfo();
-	_UpdateMainWindowTitle();
-
 	if (!_CreateD3DDevice()) {
 		return false;
 	}
@@ -51,10 +51,6 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 
 	if (FAILED(_device->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
 		D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&_commandList)))) {
-		return false;
-	}
-
-	if (!_BuildPSO()) {
 		return false;
 	}
 
@@ -83,6 +79,15 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 		_vertexBufferView.SizeInBytes = vertexBufferSize;
 	}
 
+	if (Win32Helper::GetOSVersion().Is22H2OrNewer()) {
+		// 从 Win11 22H2 开始 DisplayInformation 支持桌面窗口。失败则回落到传统方法
+		_InitializeDisplayInformation();
+	}
+
+	if (!_UpdateAdvancedColor(true)) {
+		return false;
+	}
+
 	_presenter.emplace();
 	if (!_presenter->Initialize(_device.get(), _commandQueue.get(), _dxgiFactory.get(),
 		hwndMain, width, height, _curAcKind)) {
@@ -109,6 +114,7 @@ bool Renderer::Render() noexcept {
 	_commandList->SetGraphicsRootSignature(_rootSignature.get());
 
 	if (_curAcKind != winrt::AdvancedColorKind::StandardDynamicRange) {
+		// HDR 下提高彩色正方形亮度
 		float boost = _curAcKind == winrt::AdvancedColorKind::WideColorGamut ?
 			1.0f : std::min(_sdrWhiteLevel + 1, _maxLuminance);
 		_commandList->SetGraphicsRoot32BitConstants(0, 1, &boost, 0);
@@ -176,24 +182,20 @@ bool Renderer::OnSizeChanged(uint32_t width, uint32_t height, float dpiScale) no
 }
 
 void Renderer::OnWindowPosChanged() noexcept {
+	if (_displayInfo) {
+		return;
+	}
+
 	HMONITOR hCurMonitor = MonitorFromWindow(_hwndMain, MONITOR_DEFAULTTONEAREST);
 	if (_hCurMonitor != hCurMonitor) {
 		_hCurMonitor = hCurMonitor;
-		OnDisplayChanged();
+		_UpdateAdvancedColor();
 	}
 }
 
 void Renderer::OnDisplayChanged() noexcept {
-	if (!_dxgiFactory->IsCurrent()) {
-		_CreateDXGIFactory();
-	}
-
-	winrt::AdvancedColorKind oldAcKind = _curAcKind;
-	_UpdateAdvancedColorInfo();
-	if (oldAcKind != _curAcKind) {
-		_UpdateMainWindowTitle();
-		_BuildPSO();
-		_presenter->RecreateBuffers((uint32_t)_scissorRect.right, (uint32_t)_scissorRect.bottom, _curAcKind);
+	if (!_displayInfo) {
+		_UpdateAdvancedColor();
 	}
 }
 
@@ -292,65 +294,37 @@ bool Renderer::_LoadSizeDependentResources(uint32_t width, uint32_t height, floa
 	return true;
 }
 
-bool Renderer::_BuildPSO() noexcept {
-	{
-		winrt::com_ptr<ID3DBlob> signature;
-		winrt::com_ptr<ID3DBlob> error;
-
-		if (_curAcKind == winrt::AdvancedColorKind::StandardDynamicRange) {
-			CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(0, (D3D12_ROOT_PARAMETER1*)nullptr, 0, nullptr,
-				D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
-			if (FAILED(D3D12SerializeVersionedRootSignature(&rootSignatureDesc, signature.put(), error.put()))) {
-				return false;
-			}
-		} else {
-			D3D12_ROOT_PARAMETER1 rootParam{
-				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
-				.Constants = {
-					.Num32BitValues = 1
-				},
-				.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL
-			};
-			CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(1, &rootParam, 0, nullptr,
-				D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
-			if (FAILED(D3D12SerializeVersionedRootSignature(&rootSignatureDesc, signature.put(), error.put()))) {
-				return false;
-			}
-		}
-
-		if (FAILED(_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&_rootSignature)))) {
-			return false;
-		}
+bool Renderer::_InitializeDisplayInformation() noexcept {
+	// DisplayInformation 需要 DispatcherQueue
+	winrt::DispatcherQueueController dqc{ nullptr };
+	HRESULT hr = CreateDispatcherQueueController(
+		DispatcherQueueOptions{
+			.dwSize = sizeof(DispatcherQueueOptions),
+			.threadType = DQTYPE_THREAD_CURRENT
+		},
+		(PDISPATCHERQUEUECONTROLLER*)winrt::put_abi(dqc)
+	);
+	if (FAILED(hr)) {
+		return false;
 	}
 
-	const D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
-		{ "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
-	};
+	winrt::com_ptr<IDisplayInformationStaticsInterop> interop =
+		winrt::try_get_activation_factory<winrt::DisplayInformation, IDisplayInformationStaticsInterop>();
+	if (!interop) {
+		return false;
+	}
 
-	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {
-		.pRootSignature = _rootSignature.get(),
-		.VS = {.pShaderBytecode = SimpleVS, .BytecodeLength = sizeof(SimpleVS) },
-		.PS = {
-			.pShaderBytecode = _curAcKind == winrt::AdvancedColorKind::StandardDynamicRange ?
-				sRGB_PS : AdvancedColor_PS,
-			.BytecodeLength = _curAcKind == winrt::AdvancedColorKind::StandardDynamicRange ?
-				sizeof(sRGB_PS) : sizeof(AdvancedColor_PS)
-		},
-		.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT),
-		.SampleMask = UINT_MAX,
-		.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT),
-		.InputLayout = {
-			.pInputElementDescs = inputElementDescs,
-			.NumElements = (UINT)std::size(inputElementDescs)
-		},
-		.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
-		.NumRenderTargets = 1,
-		.RTVFormats = { _curAcKind == winrt::AdvancedColorKind::StandardDynamicRange ?
-		DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R16G16B16A16_FLOAT },
-		.SampleDesc = {.Count = 1 }
-	};
-	return SUCCEEDED(_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&_pipelineState)));
+	if (FAILED(interop->GetForWindow(_hwndMain, winrt::guid_of<winrt::DisplayInformation>(), winrt::put_abi(_displayInfo)))) {
+		return false;
+	}
+
+	_acInfoChangedRevoker = _displayInfo.AdvancedColorInfoChanged(
+		winrt::auto_revoke,
+		[this](winrt::DisplayInformation const&, winrt::IInspectable const&) {
+			_UpdateAdvancedColor();
+		}
+	);
+	return true;
 }
 
 static float GetSDRWhiteLevel(std::wstring_view monitorName) noexcept {
@@ -399,9 +373,22 @@ static float GetSDRWhiteLevel(std::wstring_view monitorName) noexcept {
 }
 
 void Renderer::_UpdateAdvancedColorInfo() noexcept {
+	if (_displayInfo) {
+		winrt::AdvancedColorInfo acInfo = _displayInfo.GetAdvancedColorInfo();
+		_curAcKind = acInfo.CurrentAdvancedColorKind();
+		_maxLuminance = acInfo.MaxLuminanceInNits();
+		_sdrWhiteLevel = acInfo.SdrWhiteLevelInNits();
+		return;
+	}
+
+	// 未找到视为 SDR
 	_curAcKind = winrt::AdvancedColorKind::StandardDynamicRange;
 	_maxLuminance = 1.0f;
 	_sdrWhiteLevel = 1.0f;
+
+	if (!_dxgiFactory->IsCurrent()) {
+		_CreateDXGIFactory();
+	}
 	
 	winrt::com_ptr<IDXGIAdapter1> adapter;
 	winrt::com_ptr<IDXGIOutput> output;
@@ -421,7 +408,7 @@ void Renderer::_UpdateAdvancedColorInfo() noexcept {
 						_maxLuminance = desc.MaxLuminance / 80.0f;
 						_sdrWhiteLevel = GetSDRWhiteLevel(desc.DeviceName);
 					}
-						
+					
 					return;
 				}
 			}
@@ -429,12 +416,96 @@ void Renderer::_UpdateAdvancedColorInfo() noexcept {
 	}
 }
 
-void Renderer::_UpdateMainWindowTitle() const noexcept {
-	if (_curAcKind == winrt::AdvancedColorKind::StandardDynamicRange) {
-		SetWindowText(_hwndMain, L"D3D12Playground | SDR");
-	} else if(_curAcKind == winrt::AdvancedColorKind::WideColorGamut) {
-		SetWindowText(_hwndMain, L"D3D12Playground | WCG");
-	} else {
-		SetWindowText(_hwndMain, L"D3D12Playground | HDR");
+bool Renderer::_UpdateAdvancedColor(bool onInit) noexcept {
+	winrt::AdvancedColorKind oldAcKind = _curAcKind;
+	_UpdateAdvancedColorInfo();
+	if (!onInit && oldAcKind == _curAcKind) {
+		return true;
 	}
+
+	// 更新窗口标题
+	{
+		const wchar_t* title;
+		if (_curAcKind == winrt::AdvancedColorKind::StandardDynamicRange) {
+			title = L"D3D12Playground | SDR";
+		} else if (_curAcKind == winrt::AdvancedColorKind::WideColorGamut) {
+			title = L"D3D12Playground | WCG";
+		} else {
+			title = L"D3D12Playground | HDR";
+		}
+		SetWindowText(_hwndMain, title);
+	}
+
+	// 创建根签名
+	{
+		winrt::com_ptr<ID3DBlob> signature;
+		winrt::com_ptr<ID3DBlob> error;
+
+		if (_curAcKind == winrt::AdvancedColorKind::StandardDynamicRange) {
+			CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(0, (D3D12_ROOT_PARAMETER1*)nullptr, 0, nullptr,
+				D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+			if (FAILED(D3D12SerializeVersionedRootSignature(&rootSignatureDesc, signature.put(), error.put()))) {
+				return false;
+			}
+		} else {
+			D3D12_ROOT_PARAMETER1 rootParam{
+				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+				.Constants = {
+					.Num32BitValues = 1
+				},
+				.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL
+			};
+			CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(1, &rootParam, 0, nullptr,
+				D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+			if (FAILED(D3D12SerializeVersionedRootSignature(&rootSignatureDesc, signature.put(), error.put()))) {
+				return false;
+			}
+		}
+
+		if (FAILED(_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&_rootSignature)))) {
+			return false;
+		}
+	}
+
+	// 创建 PSO
+	{
+		const D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
+			{ "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+			{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+		};
+
+		D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {
+			.pRootSignature = _rootSignature.get(),
+			.VS = {.pShaderBytecode = SimpleVS, .BytecodeLength = sizeof(SimpleVS) },
+			.PS = {
+				.pShaderBytecode = _curAcKind == winrt::AdvancedColorKind::StandardDynamicRange ?
+					sRGB_PS : AdvancedColor_PS,
+				.BytecodeLength = _curAcKind == winrt::AdvancedColorKind::StandardDynamicRange ?
+					sizeof(sRGB_PS) : sizeof(AdvancedColor_PS)
+			},
+			.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT),
+			.SampleMask = UINT_MAX,
+			.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT),
+			.InputLayout = {
+				.pInputElementDescs = inputElementDescs,
+				.NumElements = (UINT)std::size(inputElementDescs)
+			},
+			.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
+			.NumRenderTargets = 1,
+			.RTVFormats = { _curAcKind == winrt::AdvancedColorKind::StandardDynamicRange ?
+			DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R16G16B16A16_FLOAT },
+			.SampleDesc = {.Count = 1 }
+		};
+		if (FAILED(_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&_pipelineState)))) {
+			return false;
+		}
+	}
+
+	if (!onInit) {
+		if (!_presenter->RecreateBuffers((uint32_t)_scissorRect.right, (uint32_t)_scissorRect.bottom, _curAcKind)) {
+			return false;
+		}
+	}
+
+	return true;
 }
