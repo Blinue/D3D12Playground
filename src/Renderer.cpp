@@ -1,7 +1,8 @@
 #include "pch.h"
-#include "DirectXHelper.h"
 #include "Renderer.h"
-#include "shaders/SimplePS.h"
+#include "DirectXHelper.h"
+#include "shaders/sRGB_PS.h"
+#include "shaders/AdvancedColor_PS.h"
 #include "shaders/SimpleVS.h"
 
 Renderer::~Renderer() {
@@ -9,9 +10,10 @@ Renderer::~Renderer() {
 	_presenter.reset();
 }
 
-bool Renderer::Initialize(HWND hwndAttach, uint32_t width, uint32_t height, float dpiScale) noexcept {
-	UINT dxgiFactoryFlags = 0;
-
+bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float dpiScale) noexcept {
+	_hwndMain = hwndMain;
+	_hCurMonitor = MonitorFromWindow(hwndMain, MONITOR_DEFAULTTONEAREST);
+	
 #ifdef _DEBUG
 	{
 		winrt::com_ptr<ID3D12Debug> debugController;
@@ -19,16 +21,16 @@ bool Renderer::Initialize(HWND hwndAttach, uint32_t width, uint32_t height, floa
 			debugController->EnableDebugLayer();
 		}
 	}
-
-	dxgiFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
 #endif
 
-	winrt::com_ptr<IDXGIFactory7> dxgiFactory;
-	if (FAILED(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&dxgiFactory)))) {
+	if (!_CreateDXGIFactory()) {
 		return false;
 	}
 
-	if (!_CreateD3DDevice(dxgiFactory.get())) {
+	_UpdateAdvancedColorInfo();
+	_UpdateMainWindowTitle();
+
+	if (!_CreateD3DDevice()) {
 		return false;
 	}
 
@@ -52,42 +54,7 @@ bool Renderer::Initialize(HWND hwndAttach, uint32_t width, uint32_t height, floa
 		return false;
 	}
 
-	{
-		CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(0, nullptr, 0, nullptr,
-			D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
-
-		winrt::com_ptr<ID3DBlob> signature;
-		winrt::com_ptr<ID3DBlob> error;
-		if (FAILED(D3D12SerializeRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, signature.put(), error.put()))) {
-			return false;
-		}
-		if (FAILED(_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&_rootSignature)))) {
-			return false;
-		}
-	}
-
-	D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
-		{ "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
-	};
-
-	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {
-		.pRootSignature = _rootSignature.get(),
-		.VS = { .pShaderBytecode = SimpleVS, .BytecodeLength = sizeof(SimpleVS) },
-		.PS = { .pShaderBytecode = SimplePS, .BytecodeLength = sizeof(SimplePS) },
-		.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT),
-		.SampleMask = UINT_MAX,
-		.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT),
-		.InputLayout = {
-			.pInputElementDescs = inputElementDescs,
-			.NumElements = (UINT)std::size(inputElementDescs)
-		},
-		.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
-		.NumRenderTargets = 1,
-		.RTVFormats = { DXGI_FORMAT_R8G8B8A8_UNORM_SRGB },
-		.SampleDesc = { .Count = 1 }
-	};
-	if (FAILED(_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&_pipelineState)))) {
+	if (!_BuildPSO()) {
 		return false;
 	}
 
@@ -117,7 +84,8 @@ bool Renderer::Initialize(HWND hwndAttach, uint32_t width, uint32_t height, floa
 	}
 
 	_presenter.emplace();
-	if (!_presenter->Initialize(_device.get(), _commandQueue.get(), dxgiFactory.get(), hwndAttach, width, height)) {
+	if (!_presenter->Initialize(_device.get(), _commandQueue.get(), _dxgiFactory.get(),
+		hwndMain, width, height, _curAcKind)) {
 		return false;
 	}
 
@@ -139,6 +107,13 @@ bool Renderer::Render() noexcept {
 	}
 
 	_commandList->SetGraphicsRootSignature(_rootSignature.get());
+
+	if (_curAcKind != winrt::AdvancedColorKind::StandardDynamicRange) {
+		float boost = _curAcKind == winrt::AdvancedColorKind::WideColorGamut ?
+			1.0f : std::min(_sdrWhiteLevel + 1, _maxLuminance);
+		_commandList->SetGraphicsRoot32BitConstants(0, 1, &boost, 0);
+	}
+
 	_commandList->RSSetViewports(1, &_viewport);
 	_commandList->RSSetScissorRects(1, &_scissorRect);
 
@@ -151,7 +126,12 @@ bool Renderer::Render() noexcept {
 	_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
 	{
-		const float clearColor[] = { 0.8f, 0.8f, 0.6f, 1.0f };
+		const float clearColor[] = {
+			0.8f * _sdrWhiteLevel,
+			0.8f * _sdrWhiteLevel,
+			0.6f * _sdrWhiteLevel,
+			1.0f
+		};
 		_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
 	}
 
@@ -179,12 +159,12 @@ bool Renderer::Render() noexcept {
 	return true;
 }
 
-bool Renderer::Resize(uint32_t width, uint32_t height, float dpiScale) noexcept {
+bool Renderer::OnSizeChanged(uint32_t width, uint32_t height, float dpiScale) noexcept {
 	if (width == (uint32_t)_scissorRect.right && height == (uint32_t)_scissorRect.bottom) {
 		return true;
 	}
 
-	if (!_presenter->Resize(width, height)) {
+	if (!_presenter->RecreateBuffers(width, height, _curAcKind)) {
 		return false;
 	}
 
@@ -195,11 +175,42 @@ bool Renderer::Resize(uint32_t width, uint32_t height, float dpiScale) noexcept 
 	return Render();
 }
 
-bool Renderer::_CreateD3DDevice(IDXGIFactory7* dxgiFactory) noexcept {
+void Renderer::OnWindowPosChanged() noexcept {
+	HMONITOR hCurMonitor = MonitorFromWindow(_hwndMain, MONITOR_DEFAULTTONEAREST);
+	if (_hCurMonitor != hCurMonitor) {
+		_hCurMonitor = hCurMonitor;
+		OnDisplayChanged();
+	}
+}
+
+void Renderer::OnDisplayChanged() noexcept {
+	if (!_dxgiFactory->IsCurrent()) {
+		_CreateDXGIFactory();
+	}
+
+	winrt::AdvancedColorKind oldAcKind = _curAcKind;
+	_UpdateAdvancedColorInfo();
+	if (oldAcKind != _curAcKind) {
+		_UpdateMainWindowTitle();
+		_BuildPSO();
+		_presenter->RecreateBuffers((uint32_t)_scissorRect.right, (uint32_t)_scissorRect.bottom, _curAcKind);
+	}
+}
+
+bool Renderer::_CreateDXGIFactory() noexcept {
+	UINT dxgiFactoryFlags = 0;
+#ifdef _DEBUG
+	dxgiFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
+#endif
+
+	return SUCCEEDED(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&_dxgiFactory)));
+}
+
+bool Renderer::_CreateD3DDevice() noexcept {
 	// 枚举查找第一个支持 FL11 的显卡
 	winrt::com_ptr<IDXGIAdapter1> adapter;
 	for (UINT adapterIdx = 0;
-		SUCCEEDED(dxgiFactory->EnumAdapters1(adapterIdx, adapter.put()));
+		SUCCEEDED(_dxgiFactory->EnumAdapters1(adapterIdx, adapter.put()));
 		++adapterIdx
 	) {
 		DXGI_ADAPTER_DESC1 desc;
@@ -219,7 +230,7 @@ bool Renderer::_CreateD3DDevice(IDXGIFactory7* dxgiFactory) noexcept {
 
 	// 作为最后手段，回落到 CPU 渲染 (WARP)
 	// https://docs.microsoft.com/en-us/windows/win32/direct3darticles/directx-warp
-	if (FAILED(dxgiFactory->EnumWarpAdapter(IID_PPV_ARGS(&adapter)))) {
+	if (FAILED(_dxgiFactory->EnumWarpAdapter(IID_PPV_ARGS(&adapter)))) {
 		return false;
 	}
 
@@ -279,4 +290,151 @@ bool Renderer::_LoadSizeDependentResources(uint32_t width, uint32_t height, floa
 	_scissorRect = CD3DX12_RECT(0, 0, (LONG)width, (LONG)height);
 
 	return true;
+}
+
+bool Renderer::_BuildPSO() noexcept {
+	{
+		winrt::com_ptr<ID3DBlob> signature;
+		winrt::com_ptr<ID3DBlob> error;
+
+		if (_curAcKind == winrt::AdvancedColorKind::StandardDynamicRange) {
+			CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(0, (D3D12_ROOT_PARAMETER1*)nullptr, 0, nullptr,
+				D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+			if (FAILED(D3D12SerializeVersionedRootSignature(&rootSignatureDesc, signature.put(), error.put()))) {
+				return false;
+			}
+		} else {
+			D3D12_ROOT_PARAMETER1 rootParam{
+				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+				.Constants = {
+					.Num32BitValues = 1
+				},
+				.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL
+			};
+			CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(1, &rootParam, 0, nullptr,
+				D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+			if (FAILED(D3D12SerializeVersionedRootSignature(&rootSignatureDesc, signature.put(), error.put()))) {
+				return false;
+			}
+		}
+
+		if (FAILED(_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&_rootSignature)))) {
+			return false;
+		}
+	}
+
+	const D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
+		{ "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+	};
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {
+		.pRootSignature = _rootSignature.get(),
+		.VS = {.pShaderBytecode = SimpleVS, .BytecodeLength = sizeof(SimpleVS) },
+		.PS = {
+			.pShaderBytecode = _curAcKind == winrt::AdvancedColorKind::StandardDynamicRange ?
+				sRGB_PS : AdvancedColor_PS,
+			.BytecodeLength = _curAcKind == winrt::AdvancedColorKind::StandardDynamicRange ?
+				sizeof(sRGB_PS) : sizeof(AdvancedColor_PS)
+		},
+		.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT),
+		.SampleMask = UINT_MAX,
+		.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT),
+		.InputLayout = {
+			.pInputElementDescs = inputElementDescs,
+			.NumElements = (UINT)std::size(inputElementDescs)
+		},
+		.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
+		.NumRenderTargets = 1,
+		.RTVFormats = { _curAcKind == winrt::AdvancedColorKind::StandardDynamicRange ?
+		DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R16G16B16A16_FLOAT },
+		.SampleDesc = {.Count = 1 }
+	};
+	return SUCCEEDED(_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&_pipelineState)));
+}
+
+static float GetSDRWhiteLevel(std::wstring_view monitorName) noexcept {
+	UINT32 pathCount = 0, modeCount = 0;
+	if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &pathCount, &modeCount) != ERROR_SUCCESS) {
+		return 1.0f;
+	}
+
+	std::vector<DISPLAYCONFIG_PATH_INFO> paths(pathCount);
+	std::vector<DISPLAYCONFIG_MODE_INFO> modes(modeCount);
+	if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &pathCount, paths.data(), &modeCount, modes.data(), nullptr) != ERROR_SUCCESS) {
+		return 1.0f;
+	}
+	
+	for (const DISPLAYCONFIG_PATH_INFO& path : paths) {
+		DISPLAYCONFIG_SOURCE_DEVICE_NAME sourceName = {
+			.header = {
+				.type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
+				.size = sizeof(sourceName),
+				.adapterId = path.sourceInfo.adapterId,
+				.id = path.sourceInfo.id
+			}
+		};
+		if (DisplayConfigGetDeviceInfo(&sourceName.header) != ERROR_SUCCESS) {
+			continue;
+		}
+
+		if (monitorName == sourceName.viewGdiDeviceName) {
+			DISPLAYCONFIG_SDR_WHITE_LEVEL sdr = {
+				.header = {
+					.type = DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL,
+					.size = sizeof(sdr),
+					.adapterId = path.targetInfo.adapterId,
+					.id = path.targetInfo.id
+				}
+			};
+			if (DisplayConfigGetDeviceInfo(&sdr.header) == ERROR_SUCCESS) {
+				return sdr.SDRWhiteLevel / 1000.0f;
+			} else {
+				return 1.0f;
+			}
+		}
+	}
+
+	return 1.0f;
+}
+
+void Renderer::_UpdateAdvancedColorInfo() noexcept {
+	_curAcKind = winrt::AdvancedColorKind::StandardDynamicRange;
+	_maxLuminance = 1.0f;
+	_sdrWhiteLevel = 1.0f;
+	
+	winrt::com_ptr<IDXGIAdapter1> adapter;
+	winrt::com_ptr<IDXGIOutput> output;
+	for (UINT adapterIdx = 0;
+		SUCCEEDED(_dxgiFactory->EnumAdapters1(adapterIdx, adapter.put()));
+		++adapterIdx
+	) {
+		for (UINT outputIdx = 0;
+			SUCCEEDED(adapter->EnumOutputs(outputIdx, output.put()));
+			++outputIdx
+		) {
+			DXGI_OUTPUT_DESC1 desc;
+			if (SUCCEEDED(output.try_as<IDXGIOutput6>()->GetDesc1(&desc))) {
+				if (desc.Monitor == _hCurMonitor) {
+					if (desc.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020) {
+						_curAcKind = winrt::AdvancedColorKind::HighDynamicRange;
+						_maxLuminance = desc.MaxLuminance / 80.0f;
+						_sdrWhiteLevel = GetSDRWhiteLevel(desc.DeviceName);
+					}
+						
+					return;
+				}
+			}
+		}
+	}
+}
+
+void Renderer::_UpdateMainWindowTitle() const noexcept {
+	if (_curAcKind == winrt::AdvancedColorKind::StandardDynamicRange) {
+		SetWindowText(_hwndMain, L"D3D12Playground | SDR");
+	} else if(_curAcKind == winrt::AdvancedColorKind::WideColorGamut) {
+		SetWindowText(_hwndMain, L"D3D12Playground | WCG");
+	} else {
+		SetWindowText(_hwndMain, L"D3D12Playground | HDR");
+	}
 }

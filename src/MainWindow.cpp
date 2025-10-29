@@ -25,7 +25,7 @@ bool MainWindow::Create() noexcept {
 	CreateWindowEx(
 		WS_EX_NOREDIRECTIONBITMAP,
 		MAIN_WINDOW_CLASS_NAME,
-		L"D3D12Playground",
+		nullptr,
 		WS_OVERLAPPEDWINDOW,
 		CW_USEDEFAULT,
 		CW_USEDEFAULT,
@@ -163,9 +163,23 @@ LRESULT MainWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) noex
 			NCCALCSIZE_PARAMS& params = *(NCCALCSIZE_PARAMS*)lParam;
 			// 此时第一个成员是新窗口矩形
 			const RECT& clientRect = params.rgrc[0];
-			_renderer->Resize(clientRect.right - clientRect.left, clientRect.bottom - clientRect.top, _dpiScale);
+			_renderer->OnSizeChanged(clientRect.right - clientRect.left, clientRect.bottom - clientRect.top, _dpiScale);
 		}
 
+		return 0;
+	}
+	case WM_WINDOWPOSCHANGED:
+	{
+		if (_renderer) {
+			_renderer->OnWindowPosChanged();
+		}
+		return 0;
+	}
+	case WM_DISPLAYCHANGE:
+	{
+		if (_renderer) {
+			_renderer->OnDisplayChanged();
+		}
 		return 0;
 	}
 	case WM_DESTROY:

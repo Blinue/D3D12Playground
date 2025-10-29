@@ -14,7 +14,8 @@ bool Presenter::Initialize(
 	IDXGIFactory7* dxgiFactory,
 	HWND hwndAttach,
 	uint32_t width,
-	uint32_t height
+	uint32_t height,
+	winrt::AdvancedColorKind acKind
 ) noexcept {
 	_device = device;
 	_commandQueue = commandQueue;
@@ -22,7 +23,8 @@ bool Presenter::Initialize(
 	DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {
 		.Width = width,
 		.Height = height,
-		.Format = DXGI_FORMAT_R8G8B8A8_UNORM,
+		.Format = acKind == winrt::AdvancedColorKind::StandardDynamicRange ?
+		DXGI_FORMAT_R8G8B8A8_UNORM : DXGI_FORMAT_R16G16B16A16_FLOAT,
 		.SampleDesc = {
 			.Count = 1
 		},
@@ -86,7 +88,7 @@ bool Presenter::Initialize(
 		return false;
 	}
 	
-	return _LoadSizeDependentResources();
+	return _LoadBufferResources(acKind);
 }
 
 bool Presenter::BeginFrame(
@@ -110,7 +112,7 @@ bool Presenter::BeginFrame(
 }
 
 void Presenter::EndFrame(bool waitForGpu) noexcept {
-	if (waitForGpu || _isResized) {
+	if (waitForGpu || _isRecreated) {
 		// 下面两个调用用于减少调整窗口尺寸时的边缘闪烁。
 		// 
 		// 我们希望 DWM 绘制新的窗口框架时刚好合成新帧，但这不是我们能控制的，尤其是混合架构
@@ -132,7 +134,7 @@ void Presenter::EndFrame(bool waitForGpu) noexcept {
 		// 等待 DWM 开始合成新一帧
 		_WaitForDwmComposition();
 
-		_isResized = false;
+		_isRecreated = false;
 	}
 
 	_swapChain->Present(1, 0);
@@ -141,8 +143,8 @@ void Presenter::EndFrame(bool waitForGpu) noexcept {
 	_frameIndex = _swapChain->GetCurrentBackBufferIndex();
 }
 
-bool Presenter::Resize(uint32_t width, uint32_t height) noexcept {
-	_isResized = true;
+bool Presenter::RecreateBuffers(uint32_t width, uint32_t height, winrt::AdvancedColorKind acKind) noexcept {
+	_isRecreated = true;
 
 	if (!_isframeLatencyWaited) {
 		_frameLatencyWaitableObject.wait(1000);
@@ -153,15 +155,23 @@ bool Presenter::Resize(uint32_t width, uint32_t height) noexcept {
 
 	_renderTargets.fill(nullptr);
 
+	DXGI_FORMAT format = acKind == winrt::AdvancedColorKind::StandardDynamicRange ?
+		DXGI_FORMAT_R8G8B8A8_UNORM : DXGI_FORMAT_R16G16B16A16_FLOAT;
 	HRESULT hr = _swapChain->ResizeBuffers(0, width, height,
-		DXGI_FORMAT_UNKNOWN, DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT);
+		format, DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT);
+	if (FAILED(hr)) {
+		return false;
+	}
+
+	hr = _swapChain->SetColorSpace1(acKind == winrt::AdvancedColorKind::StandardDynamicRange ?
+		DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709 : DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709);
 	if (FAILED(hr)) {
 		return false;
 	}
 
 	_frameIndex = _swapChain->GetCurrentBackBufferIndex();
 
-	return _LoadSizeDependentResources();
+	return _LoadBufferResources(acKind);
 }
 
 bool Presenter::_WaitForGpu() noexcept {
@@ -189,7 +199,7 @@ bool Presenter::_WaitForGpu() noexcept {
 	return true;
 }
 
-bool Presenter::_LoadSizeDependentResources() noexcept {
+bool Presenter::_LoadBufferResources(winrt::AdvancedColorKind acKind) noexcept {
 	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(_rtvHeap->GetCPUDescriptorHandleForHeapStart());
 	for (UINT i = 0; i < (UINT)_renderTargets.size(); ++i) {
 		if (FAILED(_swapChain->GetBuffer(i, IID_PPV_ARGS(&_renderTargets[i])))) {
@@ -197,7 +207,8 @@ bool Presenter::_LoadSizeDependentResources() noexcept {
 		}
 
 		D3D12_RENDER_TARGET_VIEW_DESC rtvDesc = {
-			.Format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
+			.Format = acKind == winrt::AdvancedColorKind::StandardDynamicRange ?
+			DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R16G16B16A16_FLOAT,
 			.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D
 		};
 		_device->CreateRenderTargetView(_renderTargets[i].get(), &rtvDesc, rtvHandle);

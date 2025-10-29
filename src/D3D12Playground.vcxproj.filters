@@ -30,10 +30,13 @@
     <Natvis Include="$(MSBuildThisFileDirectory)..\..\natvis\wil.natstepfilter" />
   </ItemGroup>
   <ItemGroup>
-    <FxCompile Include="shaders\SimplePS.hlsl">
+    <FxCompile Include="shaders\sRGB_PS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
     <FxCompile Include="shaders\SimpleVS.hlsl">
+      <Filter>Shaders</Filter>
+    </FxCompile>
+    <FxCompile Include="shaders\AdvancedColor_PS.hlsl">
       <Filter>Shaders</Filter>
     </FxCompile>
   </ItemGroup>

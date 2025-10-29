@@ -137,11 +137,14 @@
     <Manifest Include="app.manifest" />
   </ItemGroup>
   <ItemGroup>
-    <FxCompile Include="shaders\SimplePS.hlsl">
+    <FxCompile Include="shaders\sRGB_PS.hlsl">
       <ShaderType>Pixel</ShaderType>
     </FxCompile>
     <FxCompile Include="shaders\SimpleVS.hlsl">
       <ShaderType>Vertex</ShaderType>
+    </FxCompile>
+    <FxCompile Include="shaders\AdvancedColor_PS.hlsl">
+      <ShaderType>Pixel</ShaderType>
     </FxCompile>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

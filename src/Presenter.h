@@ -14,7 +14,8 @@ public:
 		IDXGIFactory7* dxgiFactory,
 		HWND hwndAttach,
 		uint32_t width,
-		uint32_t height
+		uint32_t height,
+		winrt::AdvancedColorKind acKind
 	) noexcept;
 
 	bool BeginFrame(
@@ -24,12 +25,12 @@ public:
 
 	void EndFrame(bool waitForGpu = false) noexcept;
 
-	bool Resize(uint32_t width, uint32_t height) noexcept;
+	bool RecreateBuffers(uint32_t width, uint32_t height, winrt::AdvancedColorKind acKind) noexcept;
 
 private:
 	bool _WaitForGpu() noexcept;
 
-	bool _LoadSizeDependentResources() noexcept;
+	bool _LoadBufferResources(winrt::AdvancedColorKind acKind) noexcept;
 
 	static void _WaitForDwmComposition() noexcept;
 
@@ -48,6 +49,6 @@ private:
 	wil::unique_event_nothrow _fenceEvent;
 	UINT64 _fenceValue = 0;
 
-	bool _isResized = false;
+	bool _isRecreated = false;
 	bool _isframeLatencyWaited = false;
 };
