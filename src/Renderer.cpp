@@ -375,9 +375,16 @@ static float GetSDRWhiteLevel(std::wstring_view monitorName) noexcept {
 void Renderer::_UpdateAdvancedColorInfo() noexcept {
 	if (_displayInfo) {
 		winrt::AdvancedColorInfo acInfo = _displayInfo.GetAdvancedColorInfo();
+
 		_curAcKind = acInfo.CurrentAdvancedColorKind();
-		_maxLuminance = acInfo.MaxLuminanceInNits();
-		_sdrWhiteLevel = acInfo.SdrWhiteLevelInNits();
+		if (_curAcKind == winrt::AdvancedColorKind::HighDynamicRange) {
+			_maxLuminance = acInfo.MaxLuminanceInNits() / 80.0f;
+			_sdrWhiteLevel = acInfo.SdrWhiteLevelInNits() / 80.0f;
+		} else {
+			_maxLuminance = 1.0f;
+			_sdrWhiteLevel = 1.0f;
+		}
+		
 		return;
 	}
 
@@ -403,6 +410,7 @@ void Renderer::_UpdateAdvancedColorInfo() noexcept {
 			DXGI_OUTPUT_DESC1 desc;
 			if (SUCCEEDED(output.try_as<IDXGIOutput6>()->GetDesc1(&desc))) {
 				if (desc.Monitor == _hCurMonitor) {
+					// DXGI 将 WCG 视为 SDR
 					if (desc.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020) {
 						_curAcKind = winrt::AdvancedColorKind::HighDynamicRange;
 						_maxLuminance = desc.MaxLuminance / 80.0f;
@@ -419,25 +427,35 @@ void Renderer::_UpdateAdvancedColorInfo() noexcept {
 bool Renderer::_UpdateAdvancedColor(bool onInit) noexcept {
 	winrt::AdvancedColorKind oldAcKind = _curAcKind;
 	_UpdateAdvancedColorInfo();
+
 	if (!onInit && oldAcKind == _curAcKind) {
 		return true;
 	}
 
 	// 更新窗口标题
-	{
-		const wchar_t* title;
-		if (_curAcKind == winrt::AdvancedColorKind::StandardDynamicRange) {
-			title = L"D3D12Playground | SDR";
-		} else if (_curAcKind == winrt::AdvancedColorKind::WideColorGamut) {
-			title = L"D3D12Playground | WCG";
-		} else {
-			title = L"D3D12Playground | HDR";
+	const wchar_t* title;
+	if (_curAcKind == winrt::AdvancedColorKind::StandardDynamicRange) {
+		title = L"D3D12Playground | SDR";
+	} else if (_curAcKind == winrt::AdvancedColorKind::WideColorGamut) {
+		title = L"D3D12Playground | WCG";
+	} else {
+		title = L"D3D12Playground | HDR";
+	}
+	SetWindowText(_hwndMain, title);
+
+	// SDR<->其他的转换需要改变交换链格式和着色器
+	const bool shouldUpdateResources =
+		(oldAcKind == winrt::AdvancedColorKind::StandardDynamicRange) != (_curAcKind == winrt::AdvancedColorKind::StandardDynamicRange);
+
+	if (!onInit && shouldUpdateResources) {
+		// 等待 GPU 完成然后改变交换链格式
+		if (!_presenter->RecreateBuffers((uint32_t)_scissorRect.right, (uint32_t)_scissorRect.bottom, _curAcKind)) {
+			return false;
 		}
-		SetWindowText(_hwndMain, title);
 	}
 
-	// 创建根签名
-	{
+	if (onInit || shouldUpdateResources) {
+		// 创建根签名
 		winrt::com_ptr<ID3DBlob> signature;
 		winrt::com_ptr<ID3DBlob> error;
 
@@ -465,10 +483,8 @@ bool Renderer::_UpdateAdvancedColor(bool onInit) noexcept {
 		if (FAILED(_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&_rootSignature)))) {
 			return false;
 		}
-	}
 
-	// 创建 PSO
-	{
+		// 创建 PSO
 		const D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
 			{ "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
 			{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
@@ -497,12 +513,6 @@ bool Renderer::_UpdateAdvancedColor(bool onInit) noexcept {
 			.SampleDesc = {.Count = 1 }
 		};
 		if (FAILED(_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&_pipelineState)))) {
-			return false;
-		}
-	}
-
-	if (!onInit) {
-		if (!_presenter->RecreateBuffers((uint32_t)_scissorRect.right, (uint32_t)_scissorRect.bottom, _curAcKind)) {
 			return false;
 		}
 	}
