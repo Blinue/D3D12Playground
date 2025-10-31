@@ -10,6 +10,11 @@
 
 static constexpr float SCENE_REFERRED_SDR_WHITE_LEVEL = 80.0f;
 
+struct Vertex {
+	DirectX::XMFLOAT2 position;
+	DirectX::XMFLOAT2 coord;
+};
+
 Renderer::~Renderer() {
 	// 等待 GPU
 	_presenter.reset();

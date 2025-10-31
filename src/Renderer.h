@@ -34,11 +34,6 @@ private:
 
 	bool _CheckResult(HRESULT hr) noexcept;
 
-	struct _Vertex {
-		DirectX::XMFLOAT2 position;
-		DirectX::XMFLOAT2 coord;
-	};
-
 	winrt::com_ptr<IDXGIFactory7> _dxgiFactory;
 	winrt::com_ptr<ID3D12Device5> _device;
 	winrt::com_ptr<ID3D12CommandQueue> _commandQueue;
