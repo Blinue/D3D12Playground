@@ -145,6 +145,7 @@ HRESULT Presenter::EndFrame(bool waitForGpu) noexcept {
 	if (FAILED(hr)) {
 		return hr;
 	}
+	_isframeLatencyWaited = false;
 
 	_frameIndex = _swapChain->GetCurrentBackBufferIndex();
 	return S_OK;

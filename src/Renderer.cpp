@@ -23,6 +23,8 @@ Renderer::~Renderer() {
 bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float dpiScale) noexcept {
 	_hwndMain = hwndMain;
 	_dpiScale = dpiScale;
+	_scissorRect = CD3DX12_RECT(0, 0, (LONG)width, (LONG)height);
+
 	_hCurMonitor = MonitorFromWindow(hwndMain, MONITOR_DEFAULTTONEAREST);
 	
 #ifdef _DEBUG
@@ -63,7 +65,7 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 	}
 
 	{
-		const UINT vertexBufferSize = sizeof(_Vertex) * 22;
+		const UINT vertexBufferSize = sizeof(Vertex) * 22;
 
 		// Note: using upload heaps to transfer static data like vert buffers is not 
 		// recommended. Every time the GPU needs it, the upload heap will be marshalled 
@@ -83,7 +85,7 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 		}
 
 		_vertexBufferView.BufferLocation = _vertexBuffer->GetGPUVirtualAddress();
-		_vertexBufferView.StrideInBytes = sizeof(_Vertex);
+		_vertexBufferView.StrideInBytes = sizeof(Vertex);
 		_vertexBufferView.SizeInBytes = vertexBufferSize;
 	}
 
@@ -102,22 +104,25 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 		return false;
 	}
 
-	return SUCCEEDED(_LoadSizeDependentResources(width, height));
+	return SUCCEEDED(_UpdateSizeDependentResources());
 }
 
 bool Renderer::Render() noexcept {
 	winrt::com_ptr<ID3D12Resource> frameTex;
 	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle;
-	if (!_CheckResult(_presenter->BeginFrame(frameTex, rtvHandle))) {
-		return false;
-	}
-
-	if (!_CheckResult(_commandAllocator->Reset())) {
-		return false;
+	HRESULT hr = _CheckResult(_presenter->BeginFrame(frameTex, rtvHandle));
+	if (hr != S_OK) {
+		return hr == S_FALSE;
 	}
 	
-	if (!_CheckResult(_commandList->Reset(_commandAllocator.get(), _pipelineState.get()))) {
-		return false;
+	hr = _CheckResult(_commandAllocator->Reset());
+	if (hr != S_OK) {
+		return hr == S_FALSE;
+	}
+	
+	hr = _CheckResult(_commandList->Reset(_commandAllocator.get(), _pipelineState.get()));
+	if (hr != S_OK) {
+		return hr == S_FALSE;
 	}
 
 	_commandList->SetGraphicsRootSignature(_rootSignature.get());
@@ -160,8 +165,9 @@ bool Renderer::Render() noexcept {
 		_commandList->ResourceBarrier(1, &barrier);
 	}
 
-	if (!_CheckResult(_commandList->Close())) {
-		return false;
+	hr = _CheckResult(_commandList->Close());
+	if (hr != S_OK) {
+		return hr == S_FALSE;
 	}
 
 	{
@@ -169,7 +175,7 @@ bool Renderer::Render() noexcept {
 		_commandQueue->ExecuteCommandLists(1, &t);
 	}
 
-	return _CheckResult(_presenter->EndFrame());
+	return SUCCEEDED(_CheckResult(_presenter->EndFrame()));
 }
 
 bool Renderer::OnSizeChanged(uint32_t width, uint32_t height, float dpiScale) noexcept {
@@ -179,12 +185,18 @@ bool Renderer::OnSizeChanged(uint32_t width, uint32_t height, float dpiScale) no
 	}
 	_dpiScale = dpiScale;
 
-	if (sizeChanged && !_CheckResult(_presenter->RecreateBuffers(width, height, _curAcKind))) {
-		return false;
+	if (sizeChanged) {
+		_scissorRect = CD3DX12_RECT(0, 0, (LONG)width, (LONG)height);
+
+		HRESULT hr = _CheckResult(_presenter->RecreateBuffers(width, height, _curAcKind));
+		if (hr != S_OK) {
+			return hr == S_FALSE;
+		}
 	}
 
-	if (!_CheckResult(_LoadSizeDependentResources(width, height))) {
-		return false;
+	HRESULT hr = _CheckResult(_UpdateSizeDependentResources());
+	if (hr != S_OK) {
+		return hr == S_FALSE;
 	}
 
 	return Render();
@@ -201,11 +213,11 @@ bool Renderer::OnWindowPosChanged() noexcept {
 	}
 	_hCurMonitor = hCurMonitor;
 
-	return _CheckResult(_UpdateAdvancedColor());
+	return SUCCEEDED(_CheckResult(_UpdateAdvancedColor()));
 }
 
 bool Renderer::OnDisplayChanged() noexcept {
-	return _displayInfo || _CheckResult(_UpdateAdvancedColor());
+	return _displayInfo || SUCCEEDED(_CheckResult(_UpdateAdvancedColor()));
 }
 
 HRESULT Renderer::_CreateDXGIFactory() noexcept {
@@ -252,10 +264,10 @@ bool Renderer::_CreateD3DDevice() noexcept {
 	));
 }
 
-HRESULT Renderer::_LoadSizeDependentResources(uint32_t width, uint32_t height) noexcept {
-	const float squareWidth = 200.0f * _dpiScale / width * 2.0f;
-	const float squareHeight = 200.0f * _dpiScale / height * 2.0f;
-	_Vertex triangleVertices[] = {
+HRESULT Renderer::_UpdateSizeDependentResources() noexcept {
+	const float squareWidth = 200.0f * _dpiScale / _scissorRect.right * 2.0f;
+	const float squareHeight = 200.0f * _dpiScale / _scissorRect.bottom * 2.0f;
+	Vertex triangleVertices[] = {
 		// 左上
 		{ { -1.0f, 1.0f }, { 0.0f, 0.0f } },
 		{ { -1.0f + squareWidth, 1.0f }, { 1.0f, 0.0f } },
@@ -296,8 +308,7 @@ HRESULT Renderer::_LoadSizeDependentResources(uint32_t width, uint32_t height) n
 	memcpy(pVertexDataBegin, triangleVertices, sizeof(triangleVertices));
 	_vertexBuffer->Unmap(0, nullptr);
 
-	_viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, (float)width, (float)height);
-	_scissorRect = CD3DX12_RECT(0, 0, (LONG)width, (LONG)height);
+	_viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, (float)_scissorRect.right, (float)_scissorRect.bottom);
 
 	return S_OK;
 }
@@ -333,7 +344,9 @@ bool Renderer::_InitializeDisplayInformation() noexcept {
 	_acInfoChangedRevoker = _displayInfo.AdvancedColorInfoChanged(
 		winrt::auto_revoke,
 		[this](winrt::DisplayInformation const&, winrt::IInspectable const&) {
-			_CheckResult(_UpdateAdvancedColor());
+			if (FAILED(_CheckResult(_UpdateAdvancedColor()))) {
+				PostQuitMessage(1);
+			}
 		}
 	);
 	return true;
@@ -547,13 +560,13 @@ HRESULT Renderer::_UpdateAdvancedColor(bool onInit) noexcept {
 	return S_OK;
 }
 
-bool Renderer::_CheckResult(HRESULT hr) noexcept {
+HRESULT Renderer::_CheckResult(HRESULT hr) noexcept {
 	if (SUCCEEDED(hr)) {
-		return true;
+		return S_OK;
 	}
 
 	if (hr != DXGI_ERROR_DEVICE_REMOVED && hr != DXGI_ERROR_DEVICE_RESET) {
-		return false;
+		return E_FAIL;
 	}
 
 	// 设备丢失，需要重新初始化。首先尝试等待 GPU
@@ -569,8 +582,8 @@ bool Renderer::_CheckResult(HRESULT hr) noexcept {
 	_dxgiFactory = nullptr;
 
 	if (!Initialize(_hwndMain, (uint32_t)_scissorRect.right, (uint32_t)_scissorRect.bottom, _dpiScale)) {
-		return false;
+		return E_FAIL;
 	}
 
-	return Render();
+	return Render() ? S_FALSE : E_FAIL;
 }

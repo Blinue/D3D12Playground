@@ -24,7 +24,7 @@ private:
 
 	bool _CreateD3DDevice() noexcept;
 
-	HRESULT _LoadSizeDependentResources(uint32_t width, uint32_t height) noexcept;
+	HRESULT _UpdateSizeDependentResources() noexcept;
 
 	bool _InitializeDisplayInformation() noexcept;
 
@@ -32,7 +32,7 @@ private:
 
 	HRESULT _UpdateAdvancedColor(bool onInit = false) noexcept;
 
-	bool _CheckResult(HRESULT hr) noexcept;
+	HRESULT _CheckResult(HRESULT hr) noexcept;
 
 	winrt::com_ptr<IDXGIFactory7> _dxgiFactory;
 	winrt::com_ptr<ID3D12Device5> _device;
