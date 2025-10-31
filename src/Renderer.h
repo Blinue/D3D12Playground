@@ -15,22 +15,24 @@ public:
 
 	bool OnSizeChanged(uint32_t width, uint32_t height, float dpiScale) noexcept;
 
-	void OnWindowPosChanged() noexcept;
+	bool OnWindowPosChanged() noexcept;
 
-	void OnDisplayChanged() noexcept;
+	bool OnDisplayChanged() noexcept;
 
 private:
-	bool _CreateDXGIFactory() noexcept;
+	HRESULT _CreateDXGIFactory() noexcept;
 
 	bool _CreateD3DDevice() noexcept;
 
-	bool _LoadSizeDependentResources(uint32_t width, uint32_t height, float dpiScale) noexcept;
+	HRESULT _LoadSizeDependentResources(uint32_t width, uint32_t height) noexcept;
 
 	bool _InitializeDisplayInformation() noexcept;
 
-	void _UpdateAdvancedColorInfo() noexcept;
+	HRESULT _UpdateAdvancedColorInfo() noexcept;
 
-	bool _UpdateAdvancedColor(bool onInit = false) noexcept;
+	HRESULT _UpdateAdvancedColor(bool onInit = false) noexcept;
+
+	bool _CheckResult(HRESULT hr) noexcept;
 
 	struct _Vertex {
 		DirectX::XMFLOAT2 position;
@@ -55,6 +57,7 @@ private:
 	std::optional<Presenter> _presenter;
 
 	HWND _hwndMain = NULL;
+	winrt::DispatcherQueueController _dispatcherQueueController{ nullptr };
 	winrt::DisplayInformation _displayInfo{ nullptr };
 	winrt::DisplayInformation::AdvancedColorInfoChanged_revoker _acInfoChangedRevoker;
 	HMONITOR _hCurMonitor = NULL;
@@ -63,4 +66,6 @@ private:
 	float _maxLuminance = 1.0f;
 	// HDR 模式下 SDR 内容亮度缩放
 	float _sdrWhiteLevel = 1.0f;
+
+	float _dpiScale = 1.0f;
 };

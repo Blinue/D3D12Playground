@@ -18,19 +18,19 @@ public:
 		winrt::AdvancedColorKind acKind
 	) noexcept;
 
-	bool BeginFrame(
+	HRESULT BeginFrame(
 		winrt::com_ptr<ID3D12Resource>& frameTex,
 		CD3DX12_CPU_DESCRIPTOR_HANDLE& rtvHandle
 	) noexcept;
 
-	void EndFrame(bool waitForGpu = false) noexcept;
+	HRESULT EndFrame(bool waitForGpu = false) noexcept;
 
-	bool RecreateBuffers(uint32_t width, uint32_t height, winrt::AdvancedColorKind acKind) noexcept;
+	HRESULT RecreateBuffers(uint32_t width, uint32_t height, winrt::AdvancedColorKind acKind) noexcept;
 
 private:
-	bool _WaitForGpu() noexcept;
+	HRESULT _WaitForGpu() noexcept;
 
-	bool _LoadBufferResources(winrt::AdvancedColorKind acKind) noexcept;
+	HRESULT _LoadBufferResources(winrt::AdvancedColorKind acKind) noexcept;
 
 	static void _WaitForDwmComposition() noexcept;
 

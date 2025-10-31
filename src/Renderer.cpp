@@ -8,6 +8,8 @@
 #include <dispatcherqueue.h>
 #include <windows.graphics.display.interop.h>
 
+static constexpr float SCENE_REFERRED_SDR_WHITE_LEVEL = 80.0f;
+
 Renderer::~Renderer() {
 	// 等待 GPU
 	_presenter.reset();
@@ -15,6 +17,7 @@ Renderer::~Renderer() {
 
 bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float dpiScale) noexcept {
 	_hwndMain = hwndMain;
+	_dpiScale = dpiScale;
 	_hCurMonitor = MonitorFromWindow(hwndMain, MONITOR_DEFAULTTONEAREST);
 	
 #ifdef _DEBUG
@@ -26,7 +29,7 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 	}
 #endif
 
-	if (!_CreateDXGIFactory()) {
+	if (FAILED(_CreateDXGIFactory())) {
 		return false;
 	}
 
@@ -84,7 +87,7 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 		_InitializeDisplayInformation();
 	}
 
-	if (!_UpdateAdvancedColor(true)) {
+	if (FAILED(_UpdateAdvancedColor(true))) {
 		return false;
 	}
 
@@ -94,20 +97,21 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 		return false;
 	}
 
-	return _LoadSizeDependentResources(width, height, dpiScale);
+	return SUCCEEDED(_LoadSizeDependentResources(width, height));
 }
 
 bool Renderer::Render() noexcept {
 	winrt::com_ptr<ID3D12Resource> frameTex;
 	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle;
-	_presenter->BeginFrame(frameTex, rtvHandle);
-
-	HRESULT hr = _commandAllocator->Reset();
-	if (FAILED(hr)) {
+	if (!_CheckResult(_presenter->BeginFrame(frameTex, rtvHandle))) {
 		return false;
 	}
-	hr = _commandList->Reset(_commandAllocator.get(), _pipelineState.get());
-	if (FAILED(hr)) {
+
+	if (!_CheckResult(_commandAllocator->Reset())) {
+		return false;
+	}
+	
+	if (!_CheckResult(_commandList->Reset(_commandAllocator.get(), _pipelineState.get()))) {
 		return false;
 	}
 
@@ -151,8 +155,7 @@ bool Renderer::Render() noexcept {
 		_commandList->ResourceBarrier(1, &barrier);
 	}
 
-	hr = _commandList->Close();
-	if (FAILED(hr)) {
+	if (!_CheckResult(_commandList->Close())) {
 		return false;
 	}
 
@@ -161,51 +164,52 @@ bool Renderer::Render() noexcept {
 		_commandQueue->ExecuteCommandLists(1, &t);
 	}
 
-	_presenter->EndFrame();
-	return true;
+	return _CheckResult(_presenter->EndFrame());
 }
 
 bool Renderer::OnSizeChanged(uint32_t width, uint32_t height, float dpiScale) noexcept {
-	if (width == (uint32_t)_scissorRect.right && height == (uint32_t)_scissorRect.bottom) {
+	const bool sizeChanged = width != (uint32_t)_scissorRect.right || height != (uint32_t)_scissorRect.bottom;
+	if (!sizeChanged && dpiScale == _dpiScale) {
 		return true;
 	}
+	_dpiScale = dpiScale;
 
-	if (!_presenter->RecreateBuffers(width, height, _curAcKind)) {
+	if (sizeChanged && !_CheckResult(_presenter->RecreateBuffers(width, height, _curAcKind))) {
 		return false;
 	}
 
-	if (!_LoadSizeDependentResources(width, height, dpiScale)) {
+	if (!_CheckResult(_LoadSizeDependentResources(width, height))) {
 		return false;
 	}
 
 	return Render();
 }
 
-void Renderer::OnWindowPosChanged() noexcept {
+bool Renderer::OnWindowPosChanged() noexcept {
 	if (_displayInfo) {
-		return;
+		return true;
 	}
 
 	HMONITOR hCurMonitor = MonitorFromWindow(_hwndMain, MONITOR_DEFAULTTONEAREST);
-	if (_hCurMonitor != hCurMonitor) {
-		_hCurMonitor = hCurMonitor;
-		_UpdateAdvancedColor();
+	if (_hCurMonitor == hCurMonitor) {
+		return true;
 	}
+	_hCurMonitor = hCurMonitor;
+
+	return _CheckResult(_UpdateAdvancedColor());
 }
 
-void Renderer::OnDisplayChanged() noexcept {
-	if (!_displayInfo) {
-		_UpdateAdvancedColor();
-	}
+bool Renderer::OnDisplayChanged() noexcept {
+	return _displayInfo || _CheckResult(_UpdateAdvancedColor());
 }
 
-bool Renderer::_CreateDXGIFactory() noexcept {
+HRESULT Renderer::_CreateDXGIFactory() noexcept {
 	UINT dxgiFactoryFlags = 0;
 #ifdef _DEBUG
 	dxgiFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
 #endif
 
-	return SUCCEEDED(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&_dxgiFactory)));
+	return CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&_dxgiFactory));
 }
 
 bool Renderer::_CreateD3DDevice() noexcept {
@@ -243,66 +247,69 @@ bool Renderer::_CreateD3DDevice() noexcept {
 	));
 }
 
-bool Renderer::_LoadSizeDependentResources(uint32_t width, uint32_t height, float dpiScale) noexcept {
-	{
-		const float squareWidth = 200.0f * dpiScale / width * 2.0f;
-		const float squareHeight = 200.0f * dpiScale / height * 2.0f;
-		_Vertex triangleVertices[] = {
-			// 左上
-			{ { -1.0f, 1.0f }, { 0.0f, 0.0f } },
-			{ { -1.0f + squareWidth, 1.0f }, { 1.0f, 0.0f } },
-			{ { -1.0f, 1.0f - squareHeight }, { 0.0f, 1.0f } },
-			{ { -1.0f + squareWidth, 1.0f - squareHeight }, { 1.0f, 1.0f } },
-			// 退化
-			{ { -1.0f + squareWidth, 1.0f - squareHeight }, { 0.0f, 0.0f } },
-			{ { 1.0f - squareWidth, 1.0f }, { 0.0f, 0.0f } },
-			// 右上
-			{ { 1.0f - squareWidth, 1.0f }, { 1.0f, 0.0f } },
-			{ { 1.0f, 1.0f }, { 0.0f, 0.0f } },
-			{ { 1.0f - squareWidth, 1.0f - squareHeight }, { 1.0f, 1.0f } },
-			{ { 1.0f, 1.0f - squareHeight }, { 0.0f, 1.0f } },
-			// 退化
-			{ { 1.0f, 1.0f - squareHeight }, { 0.0f, 0.0f } },
-			{ { 1.0f - squareWidth, -1.0f + squareHeight }, { 0.0f, 0.0f } },
-			// 右下
-			{ { 1.0f - squareWidth, -1.0f + squareHeight }, { 1.0f, 1.0f } },
-			{ { 1.0f, -1.0f + squareHeight }, { 0.0f, 1.0f } },
-			{ { 1.0f - squareWidth, -1.0f }, { 1.0f, 0.0f } },
-			{ { 1.0f, -1.0f }, { 0.0f, 0.0f } },
-			// 退化
-			{ { 1.0f, -1.0f }, { 0.0f, 0.0f } },
-			{ { -1.0f, -1.0f + squareHeight }, { 0.0f, 0.0f } },
-			// 左下
-			{ { -1.0f, -1.0f + squareHeight }, { 0.0f, 1.0f } },
-			{ { -1.0f + squareWidth, -1.0f + squareHeight }, { 1.0f, 1.0f } },
-			{ { -1.0f, -1.0f }, { 0.0f, 0.0f } },
-			{ { -1.0f + squareWidth, -1.0f }, { 1.0f, 0.0f } },
-		};
+HRESULT Renderer::_LoadSizeDependentResources(uint32_t width, uint32_t height) noexcept {
+	const float squareWidth = 200.0f * _dpiScale / width * 2.0f;
+	const float squareHeight = 200.0f * _dpiScale / height * 2.0f;
+	_Vertex triangleVertices[] = {
+		// 左上
+		{ { -1.0f, 1.0f }, { 0.0f, 0.0f } },
+		{ { -1.0f + squareWidth, 1.0f }, { 1.0f, 0.0f } },
+		{ { -1.0f, 1.0f - squareHeight }, { 0.0f, 1.0f } },
+		{ { -1.0f + squareWidth, 1.0f - squareHeight }, { 1.0f, 1.0f } },
+		// 退化
+		{ { -1.0f + squareWidth, 1.0f - squareHeight }, { 0.0f, 0.0f } },
+		{ { 1.0f - squareWidth, 1.0f }, { 0.0f, 0.0f } },
+		// 右上
+		{ { 1.0f - squareWidth, 1.0f }, { 1.0f, 0.0f } },
+		{ { 1.0f, 1.0f }, { 0.0f, 0.0f } },
+		{ { 1.0f - squareWidth, 1.0f - squareHeight }, { 1.0f, 1.0f } },
+		{ { 1.0f, 1.0f - squareHeight }, { 0.0f, 1.0f } },
+		// 退化
+		{ { 1.0f, 1.0f - squareHeight }, { 0.0f, 0.0f } },
+		{ { 1.0f - squareWidth, -1.0f + squareHeight }, { 0.0f, 0.0f } },
+		// 右下
+		{ { 1.0f - squareWidth, -1.0f + squareHeight }, { 1.0f, 1.0f } },
+		{ { 1.0f, -1.0f + squareHeight }, { 0.0f, 1.0f } },
+		{ { 1.0f - squareWidth, -1.0f }, { 1.0f, 0.0f } },
+		{ { 1.0f, -1.0f }, { 0.0f, 0.0f } },
+		// 退化
+		{ { 1.0f, -1.0f }, { 0.0f, 0.0f } },
+		{ { -1.0f, -1.0f + squareHeight }, { 0.0f, 0.0f } },
+		// 左下
+		{ { -1.0f, -1.0f + squareHeight }, { 0.0f, 1.0f } },
+		{ { -1.0f + squareWidth, -1.0f + squareHeight }, { 1.0f, 1.0f } },
+		{ { -1.0f, -1.0f }, { 0.0f, 0.0f } },
+		{ { -1.0f + squareWidth, -1.0f }, { 1.0f, 0.0f } },
+	};
 
-		void* pVertexDataBegin = nullptr;
-		CD3DX12_RANGE readRange(0, 0);
-		if (FAILED(_vertexBuffer->Map(0, &readRange, &pVertexDataBegin))) {
-			return false;
-		}
-		memcpy(pVertexDataBegin, triangleVertices, sizeof(triangleVertices));
-		_vertexBuffer->Unmap(0, nullptr);
+	void* pVertexDataBegin = nullptr;
+	CD3DX12_RANGE readRange(0, 0);
+	HRESULT hr = _vertexBuffer->Map(0, &readRange, &pVertexDataBegin);
+	if (FAILED(hr)) {
+		return hr;
 	}
+	memcpy(pVertexDataBegin, triangleVertices, sizeof(triangleVertices));
+	_vertexBuffer->Unmap(0, nullptr);
 
 	_viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, (float)width, (float)height);
 	_scissorRect = CD3DX12_RECT(0, 0, (LONG)width, (LONG)height);
 
-	return true;
+	return S_OK;
 }
 
 bool Renderer::_InitializeDisplayInformation() noexcept {
+	// 不重复初始化
+	if (_dispatcherQueueController) {
+		return true;
+	}
+
 	// DisplayInformation 需要 DispatcherQueue
-	winrt::DispatcherQueueController dqc{ nullptr };
 	HRESULT hr = CreateDispatcherQueueController(
 		DispatcherQueueOptions{
 			.dwSize = sizeof(DispatcherQueueOptions),
 			.threadType = DQTYPE_THREAD_CURRENT
 		},
-		(PDISPATCHERQUEUECONTROLLER*)winrt::put_abi(dqc)
+		(PDISPATCHERQUEUECONTROLLER*)winrt::put_abi(_dispatcherQueueController)
 	);
 	if (FAILED(hr)) {
 		return false;
@@ -321,7 +328,7 @@ bool Renderer::_InitializeDisplayInformation() noexcept {
 	_acInfoChangedRevoker = _displayInfo.AdvancedColorInfoChanged(
 		winrt::auto_revoke,
 		[this](winrt::DisplayInformation const&, winrt::IInspectable const&) {
-			_UpdateAdvancedColor();
+			_CheckResult(_UpdateAdvancedColor());
 		}
 	);
 	return true;
@@ -372,20 +379,20 @@ static float GetSDRWhiteLevel(std::wstring_view monitorName) noexcept {
 	return 1.0f;
 }
 
-void Renderer::_UpdateAdvancedColorInfo() noexcept {
+HRESULT Renderer::_UpdateAdvancedColorInfo() noexcept {
 	if (_displayInfo) {
 		winrt::AdvancedColorInfo acInfo = _displayInfo.GetAdvancedColorInfo();
 
 		_curAcKind = acInfo.CurrentAdvancedColorKind();
 		if (_curAcKind == winrt::AdvancedColorKind::HighDynamicRange) {
-			_maxLuminance = acInfo.MaxLuminanceInNits() / 80.0f;
-			_sdrWhiteLevel = acInfo.SdrWhiteLevelInNits() / 80.0f;
+			_maxLuminance = acInfo.MaxLuminanceInNits() / SCENE_REFERRED_SDR_WHITE_LEVEL;
+			_sdrWhiteLevel = acInfo.SdrWhiteLevelInNits() / SCENE_REFERRED_SDR_WHITE_LEVEL;
 		} else {
 			_maxLuminance = 1.0f;
 			_sdrWhiteLevel = 1.0f;
 		}
 		
-		return;
+		return S_OK;
 	}
 
 	// 未找到视为 SDR
@@ -394,7 +401,10 @@ void Renderer::_UpdateAdvancedColorInfo() noexcept {
 	_sdrWhiteLevel = 1.0f;
 
 	if (!_dxgiFactory->IsCurrent()) {
-		_CreateDXGIFactory();
+		HRESULT hr = _CreateDXGIFactory();
+		if (FAILED(hr)) {
+			return hr;
+		}
 	}
 	
 	winrt::com_ptr<IDXGIAdapter1> adapter;
@@ -413,23 +423,29 @@ void Renderer::_UpdateAdvancedColorInfo() noexcept {
 					// DXGI 将 WCG 视为 SDR
 					if (desc.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020) {
 						_curAcKind = winrt::AdvancedColorKind::HighDynamicRange;
-						_maxLuminance = desc.MaxLuminance / 80.0f;
+						_maxLuminance = desc.MaxLuminance / SCENE_REFERRED_SDR_WHITE_LEVEL;
 						_sdrWhiteLevel = GetSDRWhiteLevel(desc.DeviceName);
 					}
 					
-					return;
+					return S_OK;
 				}
 			}
 		}
 	}
+
+	return S_OK;
 }
 
-bool Renderer::_UpdateAdvancedColor(bool onInit) noexcept {
+HRESULT Renderer::_UpdateAdvancedColor(bool onInit) noexcept {
 	winrt::AdvancedColorKind oldAcKind = _curAcKind;
-	_UpdateAdvancedColorInfo();
+
+	HRESULT hr = _UpdateAdvancedColorInfo();
+	if (FAILED(hr)) {
+		return hr;
+	}
 
 	if (!onInit && oldAcKind == _curAcKind) {
-		return true;
+		return S_OK;
 	}
 
 	// 更新窗口标题
@@ -449,8 +465,9 @@ bool Renderer::_UpdateAdvancedColor(bool onInit) noexcept {
 
 	if (!onInit && shouldUpdateResources) {
 		// 等待 GPU 完成然后改变交换链格式
-		if (!_presenter->RecreateBuffers((uint32_t)_scissorRect.right, (uint32_t)_scissorRect.bottom, _curAcKind)) {
-			return false;
+		hr = _presenter->RecreateBuffers((uint32_t)_scissorRect.right, (uint32_t)_scissorRect.bottom, _curAcKind);
+		if (FAILED(hr)) {
+			return hr;
 		}
 	}
 
@@ -462,8 +479,9 @@ bool Renderer::_UpdateAdvancedColor(bool onInit) noexcept {
 		if (_curAcKind == winrt::AdvancedColorKind::StandardDynamicRange) {
 			CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(0, (D3D12_ROOT_PARAMETER1*)nullptr, 0, nullptr,
 				D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
-			if (FAILED(D3D12SerializeVersionedRootSignature(&rootSignatureDesc, signature.put(), error.put()))) {
-				return false;
+			hr = D3D12SerializeVersionedRootSignature(&rootSignatureDesc, signature.put(), error.put());
+			if (FAILED(hr)) {
+				return hr;
 			}
 		} else {
 			D3D12_ROOT_PARAMETER1 rootParam{
@@ -475,13 +493,16 @@ bool Renderer::_UpdateAdvancedColor(bool onInit) noexcept {
 			};
 			CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(1, &rootParam, 0, nullptr,
 				D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
-			if (FAILED(D3D12SerializeVersionedRootSignature(&rootSignatureDesc, signature.put(), error.put()))) {
-				return false;
+			hr = D3D12SerializeVersionedRootSignature(&rootSignatureDesc, signature.put(), error.put());
+			if (FAILED(hr)) {
+				return hr;
 			}
 		}
 
-		if (FAILED(_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&_rootSignature)))) {
-			return false;
+		hr = _device->CreateRootSignature(
+			0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&_rootSignature));
+		if (FAILED(hr)) {
+			return hr;
 		}
 
 		// 创建 PSO
@@ -512,10 +533,39 @@ bool Renderer::_UpdateAdvancedColor(bool onInit) noexcept {
 			DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R16G16B16A16_FLOAT },
 			.SampleDesc = {.Count = 1 }
 		};
-		if (FAILED(_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&_pipelineState)))) {
-			return false;
+		hr = _device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&_pipelineState));
+		if (FAILED(hr)) {
+			return hr;
 		}
 	}
 
-	return true;
+	return S_OK;
+}
+
+bool Renderer::_CheckResult(HRESULT hr) noexcept {
+	if (SUCCEEDED(hr)) {
+		return true;
+	}
+
+	if (hr != DXGI_ERROR_DEVICE_REMOVED && hr != DXGI_ERROR_DEVICE_RESET) {
+		return false;
+	}
+
+	// 设备丢失，需要重新初始化。首先尝试等待 GPU
+	_presenter.reset();
+
+	_vertexBuffer = nullptr;
+	_pipelineState = nullptr;
+	_rootSignature = nullptr;
+	_commandList = nullptr;
+	_commandAllocator = nullptr;
+	_commandQueue = nullptr;
+	_device = nullptr;
+	_dxgiFactory = nullptr;
+
+	if (!Initialize(_hwndMain, (uint32_t)_scissorRect.right, (uint32_t)_scissorRect.bottom, _dpiScale)) {
+		return false;
+	}
+
+	return Render();
 }

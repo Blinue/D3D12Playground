@@ -88,10 +88,10 @@ bool Presenter::Initialize(
 		return false;
 	}
 	
-	return _LoadBufferResources(acKind);
+	return SUCCEEDED(_LoadBufferResources(acKind));
 }
 
-bool Presenter::BeginFrame(
+HRESULT Presenter::BeginFrame(
 	winrt::com_ptr<ID3D12Resource>& frameTex,
 	CD3DX12_CPU_DESCRIPTOR_HANDLE& rtvHandle
 ) noexcept {
@@ -100,18 +100,19 @@ bool Presenter::BeginFrame(
 		_isframeLatencyWaited = true;
 	}
 
-	if (!_WaitForGpu()) {
-		return false;
+	HRESULT hr = _WaitForGpu();
+	if (FAILED(hr)) {
+		return hr;
 	}
 
 	frameTex = _renderTargets[_frameIndex];
 	rtvHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(
 		_rtvHeap->GetCPUDescriptorHandleForHeapStart(), _frameIndex, _rtvDescriptorSize);
 
-	return true;
+	return S_OK;
 }
 
-void Presenter::EndFrame(bool waitForGpu) noexcept {
+HRESULT Presenter::EndFrame(bool waitForGpu) noexcept {
 	if (waitForGpu || _isRecreated) {
 		// 下面两个调用用于减少调整窗口尺寸时的边缘闪烁。
 		// 
@@ -129,7 +130,10 @@ void Presenter::EndFrame(bool waitForGpu) noexcept {
 		// 实用价值。
 
 		// 等待渲染完成
-		_WaitForGpu();
+		HRESULT hr = _WaitForGpu();
+		if (FAILED(hr)) {
+			return hr;
+		}
 
 		// 等待 DWM 开始合成新一帧
 		_WaitForDwmComposition();
@@ -137,13 +141,16 @@ void Presenter::EndFrame(bool waitForGpu) noexcept {
 		_isRecreated = false;
 	}
 
-	_swapChain->Present(1, 0);
-	_isframeLatencyWaited = false;
+	HRESULT hr = _swapChain->Present(1, 0);
+	if (FAILED(hr)) {
+		return hr;
+	}
 
 	_frameIndex = _swapChain->GetCurrentBackBufferIndex();
+	return S_OK;
 }
 
-bool Presenter::RecreateBuffers(uint32_t width, uint32_t height, winrt::AdvancedColorKind acKind) noexcept {
+HRESULT Presenter::RecreateBuffers(uint32_t width, uint32_t height, winrt::AdvancedColorKind acKind) noexcept {
 	_isRecreated = true;
 
 	if (!_isframeLatencyWaited) {
@@ -151,22 +158,25 @@ bool Presenter::RecreateBuffers(uint32_t width, uint32_t height, winrt::Advanced
 		_isframeLatencyWaited = true;
 	}
 
-	_WaitForGpu();
+	HRESULT hr = _WaitForGpu();
+	if (FAILED(hr)) {
+		return hr;
+	}
 
 	_renderTargets.fill(nullptr);
 
 	DXGI_FORMAT format = acKind == winrt::AdvancedColorKind::StandardDynamicRange ?
 		DXGI_FORMAT_R8G8B8A8_UNORM : DXGI_FORMAT_R16G16B16A16_FLOAT;
-	HRESULT hr = _swapChain->ResizeBuffers(0, width, height,
+	hr = _swapChain->ResizeBuffers(0, width, height,
 		format, DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT);
 	if (FAILED(hr)) {
-		return false;
+		return hr;
 	}
 
 	hr = _swapChain->SetColorSpace1(acKind == winrt::AdvancedColorKind::StandardDynamicRange ?
 		DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709 : DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709);
 	if (FAILED(hr)) {
-		return false;
+		return hr;
 	}
 
 	_frameIndex = _swapChain->GetCurrentBackBufferIndex();
@@ -174,36 +184,37 @@ bool Presenter::RecreateBuffers(uint32_t width, uint32_t height, winrt::Advanced
 	return _LoadBufferResources(acKind);
 }
 
-bool Presenter::_WaitForGpu() noexcept {
+HRESULT Presenter::_WaitForGpu() noexcept {
 	if (!_fence) {
-		return true;
+		return S_OK;
 	}
 
 	UINT64 newFenceValue = _fenceValue + 1;
 	HRESULT hr = _commandQueue->Signal(_fence.get(), newFenceValue);
 	if (FAILED(hr)) {
-		return false;
+		return hr;
 	}
 	_fenceValue = newFenceValue;
 
 	if (_fence->GetCompletedValue() >= _fenceValue) {
-		return true;
+		return S_OK;
 	}
 
 	hr = _fence->SetEventOnCompletion(_fenceValue, _fenceEvent.get());
 	if (FAILED(hr)) {
-		return false;
+		return hr;
 	}
 
 	_fenceEvent.wait();
-	return true;
+	return S_OK;
 }
 
-bool Presenter::_LoadBufferResources(winrt::AdvancedColorKind acKind) noexcept {
+HRESULT Presenter::_LoadBufferResources(winrt::AdvancedColorKind acKind) noexcept {
 	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(_rtvHeap->GetCPUDescriptorHandleForHeapStart());
 	for (UINT i = 0; i < (UINT)_renderTargets.size(); ++i) {
-		if (FAILED(_swapChain->GetBuffer(i, IID_PPV_ARGS(&_renderTargets[i])))) {
-			return false;
+		HRESULT hr = _swapChain->GetBuffer(i, IID_PPV_ARGS(&_renderTargets[i]));
+		if (FAILED(hr)) {
+			return hr;
 		}
 
 		D3D12_RENDER_TARGET_VIEW_DESC rtvDesc = {
@@ -215,7 +226,7 @@ bool Presenter::_LoadBufferResources(winrt::AdvancedColorKind acKind) noexcept {
 		rtvHandle.Offset(1, _rtvDescriptorSize);
 	}
 
-	return true;
+	return S_OK;
 }
 
 // 和 DwmFlush 效果相同但更准确
