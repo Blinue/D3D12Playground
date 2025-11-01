@@ -217,6 +217,37 @@ bool Renderer::OnWindowPosChanged() noexcept {
 }
 
 bool Renderer::OnDisplayChanged() noexcept {
+	// 如果正在使用 WARP 渲染则检测是否有显卡连接了
+	if (_isUsingWarp && !_dxgiFactory->IsCurrent()) {
+		HRESULT hr = _CreateDXGIFactory();
+		if (FAILED(hr)) {
+			return false;
+		}
+
+		// 查找是否有支持 D3D12 的显卡
+		winrt::com_ptr<IDXGIAdapter1> adapter;
+		for (UINT adapterIdx = 0;
+			SUCCEEDED(_dxgiFactory->EnumAdapters1(adapterIdx, adapter.put()));
+			++adapterIdx
+		) {
+			DXGI_ADAPTER_DESC1 desc;
+			hr = adapter->GetDesc1(&desc);
+			if (FAILED(hr) || DirectXHelper::IsWARP(desc)) {
+				continue;
+			}
+
+			if (SUCCEEDED(D3D12CreateDevice(
+				adapter.get(),
+				D3D_FEATURE_LEVEL_11_0,
+				__uuidof(ID3D12Device),
+				nullptr
+			))) {
+				// 改为使用显卡渲染
+				return _HandleDeviceLost();
+			}
+		}
+	}
+
 	return _displayInfo || SUCCEEDED(_CheckResult(_UpdateAdvancedColor()));
 }
 
@@ -230,7 +261,7 @@ HRESULT Renderer::_CreateDXGIFactory() noexcept {
 }
 
 bool Renderer::_CreateD3DDevice() noexcept {
-	// 枚举查找第一个支持 FL11 的显卡
+	// 枚举查找第一个支持 D3D12 的显卡
 	winrt::com_ptr<IDXGIAdapter1> adapter;
 	for (UINT adapterIdx = 0;
 		SUCCEEDED(_dxgiFactory->EnumAdapters1(adapterIdx, adapter.put()));
@@ -247,6 +278,7 @@ bool Renderer::_CreateD3DDevice() noexcept {
 			D3D_FEATURE_LEVEL_11_0,
 			IID_PPV_ARGS(&_device)
 		))) {
+			_isUsingWarp = false;
 			return true;
 		}
 	}
@@ -257,11 +289,16 @@ bool Renderer::_CreateD3DDevice() noexcept {
 		return false;
 	}
 
-	return SUCCEEDED(D3D12CreateDevice(
+	if (SUCCEEDED(D3D12CreateDevice(
 		adapter.get(),
 		D3D_FEATURE_LEVEL_11_0,
 		IID_PPV_ARGS(&_device)
-	));
+	))) {
+		_isUsingWarp = true;
+		return true;
+	}
+
+	return false;
 }
 
 HRESULT Renderer::_UpdateSizeDependentResources() noexcept {
@@ -569,7 +606,12 @@ HRESULT Renderer::_CheckResult(HRESULT hr) noexcept {
 		return E_FAIL;
 	}
 
-	// 设备丢失，需要重新初始化。首先尝试等待 GPU
+	// 设备丢失，需要重新初始化
+	return _HandleDeviceLost() ? S_FALSE : E_FAIL;
+}
+
+bool Renderer::_HandleDeviceLost() noexcept {
+	// 首先尝试等待 GPU
 	_presenter.reset();
 
 	_vertexBuffer = nullptr;
@@ -582,8 +624,8 @@ HRESULT Renderer::_CheckResult(HRESULT hr) noexcept {
 	_dxgiFactory = nullptr;
 
 	if (!Initialize(_hwndMain, (uint32_t)_scissorRect.right, (uint32_t)_scissorRect.bottom, _dpiScale)) {
-		return E_FAIL;
+		return false;
 	}
 
-	return Render() ? S_FALSE : E_FAIL;
+	return Render();
 }

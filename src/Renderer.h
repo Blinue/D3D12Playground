@@ -34,6 +34,8 @@ private:
 
 	HRESULT _CheckResult(HRESULT hr) noexcept;
 
+	bool _HandleDeviceLost() noexcept;
+
 	winrt::com_ptr<IDXGIFactory7> _dxgiFactory;
 	winrt::com_ptr<ID3D12Device5> _device;
 	winrt::com_ptr<ID3D12CommandQueue> _commandQueue;
@@ -63,4 +65,6 @@ private:
 	float _sdrWhiteLevel = 1.0f;
 
 	float _dpiScale = 1.0f;
+
+	bool _isUsingWarp = false;
 };
