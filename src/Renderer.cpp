@@ -107,20 +107,20 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 	return SUCCEEDED(_UpdateSizeDependentResources());
 }
 
-bool Renderer::Render() noexcept {
+bool Renderer::Render(bool onHandlingDeviceLost) noexcept {
 	winrt::com_ptr<ID3D12Resource> frameTex;
 	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle;
-	HRESULT hr = _CheckResult(_presenter->BeginFrame(frameTex, rtvHandle));
+	HRESULT hr = _CheckResult(_presenter->BeginFrame(frameTex, rtvHandle), onHandlingDeviceLost);
 	if (hr != S_OK) {
 		return hr == S_FALSE;
 	}
 	
-	hr = _CheckResult(_commandAllocator->Reset());
+	hr = _CheckResult(_commandAllocator->Reset(), onHandlingDeviceLost);
 	if (hr != S_OK) {
 		return hr == S_FALSE;
 	}
 	
-	hr = _CheckResult(_commandList->Reset(_commandAllocator.get(), _pipelineState.get()));
+	hr = _CheckResult(_commandList->Reset(_commandAllocator.get(), _pipelineState.get()), onHandlingDeviceLost);
 	if (hr != S_OK) {
 		return hr == S_FALSE;
 	}
@@ -165,7 +165,7 @@ bool Renderer::Render() noexcept {
 		_commandList->ResourceBarrier(1, &barrier);
 	}
 
-	hr = _CheckResult(_commandList->Close());
+	hr = _CheckResult(_commandList->Close(), onHandlingDeviceLost);
 	if (hr != S_OK) {
 		return hr == S_FALSE;
 	}
@@ -175,7 +175,7 @@ bool Renderer::Render() noexcept {
 		_commandQueue->ExecuteCommandLists(1, &t);
 	}
 
-	return SUCCEEDED(_CheckResult(_presenter->EndFrame()));
+	return SUCCEEDED(_CheckResult(_presenter->EndFrame(), onHandlingDeviceLost));
 }
 
 bool Renderer::OnSizeChanged(uint32_t width, uint32_t height, float dpiScale) noexcept {
@@ -597,12 +597,13 @@ HRESULT Renderer::_UpdateAdvancedColor(bool onInit) noexcept {
 	return (onInit || Render()) ? S_OK : E_FAIL;
 }
 
-HRESULT Renderer::_CheckResult(HRESULT hr) noexcept {
+HRESULT Renderer::_CheckResult(HRESULT hr, bool onHandlingDeviceLost) noexcept {
 	if (SUCCEEDED(hr)) {
 		return S_OK;
 	}
 
-	if (hr != DXGI_ERROR_DEVICE_REMOVED && hr != DXGI_ERROR_DEVICE_RESET) {
+	// 处理设备丢失时再次发生设备丢失则不再尝试恢复
+	if ((hr != DXGI_ERROR_DEVICE_REMOVED && hr != DXGI_ERROR_DEVICE_RESET) || onHandlingDeviceLost) {
 		return E_FAIL;
 	}
 
@@ -627,5 +628,5 @@ bool Renderer::_HandleDeviceLost() noexcept {
 		return false;
 	}
 
-	return Render();
+	return Render(true);
 }

@@ -11,7 +11,7 @@ public:
 
 	bool Initialize(HWND hwndMain, uint32_t width, uint32_t height, float dpiScale) noexcept;
 
-	bool Render() noexcept;
+	bool Render(bool onHandlingDeviceLost = false) noexcept;
 
 	bool OnSizeChanged(uint32_t width, uint32_t height, float dpiScale) noexcept;
 
@@ -32,7 +32,7 @@ private:
 
 	HRESULT _UpdateAdvancedColor(bool onInit = false) noexcept;
 
-	HRESULT _CheckResult(HRESULT hr) noexcept;
+	HRESULT _CheckResult(HRESULT hr, bool onHandlingDeviceLost = false) noexcept;
 
 	bool _HandleDeviceLost() noexcept;
 
