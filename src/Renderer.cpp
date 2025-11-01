@@ -557,7 +557,7 @@ HRESULT Renderer::_UpdateAdvancedColor(bool onInit) noexcept {
 		}
 	}
 
-	return S_OK;
+	return (onInit || Render()) ? S_OK : E_FAIL;
 }
 
 HRESULT Renderer::_CheckResult(HRESULT hr) noexcept {
