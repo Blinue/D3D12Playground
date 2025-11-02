@@ -92,7 +92,7 @@ bool Presenter::Initialize(
 }
 
 HRESULT Presenter::BeginFrame(
-	winrt::com_ptr<ID3D12Resource>& frameTex,
+	ID3D12Resource** frameTex,
 	CD3DX12_CPU_DESCRIPTOR_HANDLE& rtvHandle
 ) noexcept {
 	if (!_isframeLatencyWaited) {
@@ -105,7 +105,7 @@ HRESULT Presenter::BeginFrame(
 		return hr;
 	}
 
-	frameTex = _renderTargets[_frameIndex];
+	*frameTex = _renderTargets[_frameIndex].get();
 	rtvHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(
 		_rtvHeap->GetCPUDescriptorHandleForHeapStart(), _frameIndex, _rtvDescriptorSize);
 

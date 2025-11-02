@@ -108,9 +108,9 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 }
 
 bool Renderer::Render(bool onHandlingDeviceLost) noexcept {
-	winrt::com_ptr<ID3D12Resource> frameTex;
+	ID3D12Resource* frameTex;
 	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle;
-	HRESULT hr = _CheckResult(_presenter->BeginFrame(frameTex, rtvHandle), onHandlingDeviceLost);
+	HRESULT hr = _CheckResult(_presenter->BeginFrame(&frameTex, rtvHandle), onHandlingDeviceLost);
 	if (hr != S_OK) {
 		return hr == S_FALSE;
 	}
@@ -139,7 +139,7 @@ bool Renderer::Render(bool onHandlingDeviceLost) noexcept {
 
 	{
 		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			frameTex.get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+			frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
 		_commandList->ResourceBarrier(1, &barrier);
 	}
 
@@ -161,7 +161,7 @@ bool Renderer::Render(bool onHandlingDeviceLost) noexcept {
 	
 	{
 		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			frameTex.get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+			frameTex, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
 		_commandList->ResourceBarrier(1, &barrier);
 	}
 
@@ -597,6 +597,7 @@ HRESULT Renderer::_UpdateAdvancedColor(bool onInit) noexcept {
 	return (onInit || Render()) ? S_OK : E_FAIL;
 }
 
+// 设备丢失会立即尝试恢复，所以调用时注意局部变量不要引用 D3D 资源
 HRESULT Renderer::_CheckResult(HRESULT hr, bool onHandlingDeviceLost) noexcept {
 	if (SUCCEEDED(hr)) {
 		return S_OK;
