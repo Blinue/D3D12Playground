@@ -1,11 +1,12 @@
 #include "pch.h"
 #include "Renderer.h"
 #include "DirectXHelper.h"
-#include "shaders/sRGB_PS.h"
 #include "shaders/AdvancedColor_PS.h"
 #include "shaders/SimpleVS.h"
+#include "shaders/sRGB_PS.h"
 #include "Win32Helper.h"
 #include <dispatcherqueue.h>
+#include <dxgidebug.h>
 #include <windows.graphics.display.interop.h>
 
 static constexpr float SCENE_REFERRED_SDR_WHITE_LEVEL = 80.0f;
@@ -16,8 +17,7 @@ struct Vertex {
 };
 
 Renderer::~Renderer() {
-	// 等待 GPU
-	_presenter.reset();
+	_ReleaseD3DResources();
 }
 
 bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float dpiScale) noexcept {
@@ -29,9 +29,11 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 	
 #ifdef _DEBUG
 	{
-		winrt::com_ptr<ID3D12Debug> debugController;
+		winrt::com_ptr<ID3D12Debug1> debugController;
 		if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)))) {
 			debugController->EnableDebugLayer();
+			// 启用 GPU-based validation
+			debugController->SetEnableGPUBasedValidation(TRUE);
 		}
 	}
 #endif
@@ -255,6 +257,13 @@ HRESULT Renderer::_CreateDXGIFactory() noexcept {
 	UINT dxgiFactoryFlags = 0;
 #ifdef _DEBUG
 	dxgiFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
+
+	// 发生错误时中断
+	winrt::com_ptr<IDXGIInfoQueue> dxgiInfoQueue;
+	if (SUCCEEDED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&dxgiInfoQueue)))) {
+		dxgiInfoQueue->SetBreakOnSeverity(DXGI_DEBUG_ALL, DXGI_INFO_QUEUE_MESSAGE_SEVERITY_ERROR, true);
+		dxgiInfoQueue->SetBreakOnSeverity(DXGI_DEBUG_ALL, DXGI_INFO_QUEUE_MESSAGE_SEVERITY_CORRUPTION, true);
+	}
 #endif
 
 	return CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&_dxgiFactory));
@@ -613,7 +622,17 @@ HRESULT Renderer::_CheckResult(HRESULT hr, bool onHandlingDeviceLost) noexcept {
 }
 
 bool Renderer::_HandleDeviceLost() noexcept {
-	// 首先尝试等待 GPU
+	_ReleaseD3DResources();
+	
+	if (!Initialize(_hwndMain, (uint32_t)_scissorRect.right, (uint32_t)_scissorRect.bottom, _dpiScale)) {
+		return false;
+	}
+
+	return Render(true);
+}
+
+void Renderer::_ReleaseD3DResources() noexcept {
+	// 首先等待 GPU
 	_presenter.reset();
 
 	_vertexBuffer = nullptr;
@@ -624,10 +643,16 @@ bool Renderer::_HandleDeviceLost() noexcept {
 	_commandQueue = nullptr;
 	_device = nullptr;
 	_dxgiFactory = nullptr;
-
-	if (!Initialize(_hwndMain, (uint32_t)_scissorRect.right, (uint32_t)_scissorRect.bottom, _dpiScale)) {
-		return false;
+	
+#ifdef _DEBUG
+	// 检查是否所有 D3D 资源都已释放。和 ID3D12DebugDevice::ReportLiveDeviceObjects 相比，
+	// IDXGIDebug::ReportLiveObjects 检查的范围更大，而且可以在所有资源释放后调用。
+	winrt::com_ptr<IDXGIDebug1> dxgiDebug;
+	if (SUCCEEDED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&dxgiDebug)))) {
+		dxgiDebug->ReportLiveObjects(
+			DXGI_DEBUG_ALL,
+			DXGI_DEBUG_RLO_FLAGS(DXGI_DEBUG_RLO_DETAIL | DXGI_DEBUG_RLO_IGNORE_INTERNAL)
+		);
 	}
-
-	return Render(true);
+#endif
 }

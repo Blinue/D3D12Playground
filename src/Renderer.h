@@ -36,6 +36,8 @@ private:
 
 	bool _HandleDeviceLost() noexcept;
 
+	void _ReleaseD3DResources() noexcept;
+
 	winrt::com_ptr<IDXGIFactory7> _dxgiFactory;
 	winrt::com_ptr<ID3D12Device5> _device;
 	winrt::com_ptr<ID3D12CommandQueue> _commandQueue;
