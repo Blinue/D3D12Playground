@@ -266,11 +266,31 @@ HRESULT Renderer::_CreateDXGIFactory() noexcept {
 #ifdef _DEBUG
 	dxgiFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
 
-	// 发生错误时中断
 	winrt::com_ptr<IDXGIInfoQueue> dxgiInfoQueue;
 	if (SUCCEEDED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&dxgiInfoQueue)))) {
-		dxgiInfoQueue->SetBreakOnSeverity(DXGI_DEBUG_ALL, DXGI_INFO_QUEUE_MESSAGE_SEVERITY_ERROR, true);
+		// 发生错误时中断
 		dxgiInfoQueue->SetBreakOnSeverity(DXGI_DEBUG_ALL, DXGI_INFO_QUEUE_MESSAGE_SEVERITY_CORRUPTION, true);
+		dxgiInfoQueue->SetBreakOnSeverity(DXGI_DEBUG_ALL, DXGI_INFO_QUEUE_MESSAGE_SEVERITY_ERROR, true);
+		
+		DXGI_INFO_QUEUE_MESSAGE_SEVERITY severities[] = {
+			DXGI_INFO_QUEUE_MESSAGE_SEVERITY_INFO
+		};
+		DXGI_INFO_QUEUE_MESSAGE_ID ids[] = {
+			// Device Debug Layer Startup Options: GPU-Based Validation is enabled (disabled by default). This results
+			// in new validation not possible during API calls on the CPU, by creating patched shaders that have
+			// validation added directly to the shader. However, it can slow things down a lot, especially for
+			// applications with numerous PSOs. Time to see the first render frame may take several minutes.
+			D3D12_MESSAGE_ID_CREATEDEVICE_DEBUG_LAYER_STARTUP_OPTIONS
+		};
+		DXGI_INFO_QUEUE_FILTER filter = {
+			.DenyList = {
+				.NumSeverities = (UINT)std::size(severities),
+				.pSeverityList = severities,
+				.NumIDs = (UINT)std::size(ids),
+				.pIDList = ids
+			}
+		};
+		dxgiInfoQueue->AddStorageFilterEntries(DXGI_DEBUG_ALL, &filter);
 	}
 #endif
 
