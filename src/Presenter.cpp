@@ -29,7 +29,7 @@ bool Presenter::Initialize(
 			.Count = 1
 		},
 		.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT,
-		.BufferCount = (UINT)_renderTargets.size(),
+		.BufferCount = BUFFER_COUNT,
 #ifdef _DEBUG
 		// 我们应确保两种渲染方式可以无缝切换，DXGI_SCALING_NONE 使错误更容易观察到
 		.Scaling = DXGI_SCALING_NONE,
@@ -59,19 +59,23 @@ bool Presenter::Initialize(
 		return false;
 	}
 
+	if (FAILED(_swapChain->SetMaximumFrameLatency(BUFFER_COUNT - 1))) {
+		return false;
+	}
+
 	_frameLatencyWaitableObject.reset(_swapChain->GetFrameLatencyWaitableObject());
 	if (!_frameLatencyWaitableObject) {
 		return false;
 	}
 
-	_frameIndex = _swapChain->GetCurrentBackBufferIndex();
+	_bufferIndex = _swapChain->GetCurrentBackBufferIndex();
 
 	dxgiFactory->MakeWindowAssociation(hwndAttach, DXGI_MWA_NO_ALT_ENTER);
 
 	{
 		D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {
 			.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
-			.NumDescriptors = (UINT)_renderTargets.size()
+			.NumDescriptors = BUFFER_COUNT
 		};
 		if (FAILED(device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&_rtvHeap)))) {
 			return false;
@@ -80,7 +84,7 @@ bool Presenter::Initialize(
 
 	_rtvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
-	if (FAILED(device->CreateFence(_fenceValue, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_fence)))) {
+	if (FAILED(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_fence)))) {
 		return false;
 	}
 
@@ -93,21 +97,27 @@ bool Presenter::Initialize(
 
 HRESULT Presenter::BeginFrame(
 	ID3D12Resource** frameTex,
-	CD3DX12_CPU_DESCRIPTOR_HANDLE& rtvHandle
+	CD3DX12_CPU_DESCRIPTOR_HANDLE& rtvHandle,
+	uint32_t& bufferIndex
 ) noexcept {
 	if (!_isframeLatencyWaited) {
 		_frameLatencyWaitableObject.wait(1000);
 		_isframeLatencyWaited = true;
 	}
 
-	HRESULT hr = _WaitForGpu();
-	if (FAILED(hr)) {
-		return hr;
+	if (_fence->GetCompletedValue() < _bufferFenceValues[_bufferIndex]) {
+		HRESULT hr = _fence->SetEventOnCompletion(_bufferFenceValues[_bufferIndex], _fenceEvent.get());
+		if (FAILED(hr)) {
+			return hr;
+		}
+
+		_fenceEvent.wait();
 	}
 
-	*frameTex = _renderTargets[_frameIndex].get();
+	*frameTex = _renderTargets[_bufferIndex].get();
 	rtvHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(
-		_rtvHeap->GetCPUDescriptorHandleForHeapStart(), _frameIndex, _rtvDescriptorSize);
+		_rtvHeap->GetCPUDescriptorHandleForHeapStart(), _bufferIndex, _rtvDescriptorSize);
+	bufferIndex = _bufferIndex;
 
 	return S_OK;
 }
@@ -147,7 +157,14 @@ HRESULT Presenter::EndFrame() noexcept {
 	}
 	_isframeLatencyWaited = false;
 
-	_frameIndex = _swapChain->GetCurrentBackBufferIndex();
+	hr = _commandQueue->Signal(_fence.get(), ++_curFenceValue);
+	if (FAILED(hr)) {
+		return hr;
+	}
+	_bufferFenceValues[_bufferIndex] = _curFenceValue;
+
+	_bufferIndex = _swapChain->GetCurrentBackBufferIndex();
+
 	return S_OK;
 }
 
@@ -180,7 +197,7 @@ HRESULT Presenter::RecreateBuffers(uint32_t width, uint32_t height, winrt::Advan
 		return hr;
 	}
 
-	_frameIndex = _swapChain->GetCurrentBackBufferIndex();
+	_bufferIndex = _swapChain->GetCurrentBackBufferIndex();
 
 	return _LoadBufferResources(acKind);
 }
@@ -190,18 +207,12 @@ HRESULT Presenter::_WaitForGpu() noexcept {
 		return S_OK;
 	}
 
-	UINT64 newFenceValue = _fenceValue + 1;
-	HRESULT hr = _commandQueue->Signal(_fence.get(), newFenceValue);
+	HRESULT hr = _commandQueue->Signal(_fence.get(), ++_curFenceValue);
 	if (FAILED(hr)) {
 		return hr;
 	}
-	_fenceValue = newFenceValue;
 
-	if (_fence->GetCompletedValue() >= _fenceValue) {
-		return S_OK;
-	}
-
-	hr = _fence->SetEventOnCompletion(_fenceValue, _fenceEvent.get());
+	hr = _fence->SetEventOnCompletion(_curFenceValue, _fenceEvent.get());
 	if (FAILED(hr)) {
 		return hr;
 	}
@@ -212,7 +223,7 @@ HRESULT Presenter::_WaitForGpu() noexcept {
 
 HRESULT Presenter::_LoadBufferResources(winrt::AdvancedColorKind acKind) noexcept {
 	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(_rtvHeap->GetCPUDescriptorHandleForHeapStart());
-	for (UINT i = 0; i < (UINT)_renderTargets.size(); ++i) {
+	for (uint32_t i = 0; i < BUFFER_COUNT; ++i) {
 		HRESULT hr = _swapChain->GetBuffer(i, IID_PPV_ARGS(&_renderTargets[i]));
 		if (FAILED(hr)) {
 			return hr;

@@ -61,9 +61,11 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 		}
 	}
 
-	if (FAILED(_device->CreateCommandAllocator(
-		D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&_commandAllocator)))) {
-		return false;
+	for (winrt::com_ptr<ID3D12CommandAllocator>& commandAllocator : _commandAllocators) {
+		if (FAILED(_device->CreateCommandAllocator(
+			D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator)))) {
+			return false;
+		}
 	}
 
 	if (FAILED(_device->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
@@ -117,17 +119,18 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 bool Renderer::Render(bool onHandlingDeviceLost) noexcept {
 	ID3D12Resource* frameTex;
 	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle;
-	HRESULT hr = _CheckResult(_presenter->BeginFrame(&frameTex, rtvHandle), onHandlingDeviceLost);
+	uint32_t frameIndex;
+	HRESULT hr = _CheckResult(_presenter->BeginFrame(&frameTex, rtvHandle, frameIndex), onHandlingDeviceLost);
 	if (hr != S_OK) {
 		return hr == S_FALSE;
 	}
 	
-	hr = _CheckResult(_commandAllocator->Reset(), onHandlingDeviceLost);
+	hr = _CheckResult(_commandAllocators[frameIndex]->Reset(), onHandlingDeviceLost);
 	if (hr != S_OK) {
 		return hr == S_FALSE;
 	}
 	
-	hr = _CheckResult(_commandList->Reset(_commandAllocator.get(), _pipelineState.get()), onHandlingDeviceLost);
+	hr = _CheckResult(_commandList->Reset(_commandAllocators[frameIndex].get(), _pipelineState.get()), onHandlingDeviceLost);
 	if (hr != S_OK) {
 		return hr == S_FALSE;
 	}
@@ -644,7 +647,7 @@ void Renderer::_ReleaseD3DResources() noexcept {
 	_pipelineState = nullptr;
 	_rootSignature = nullptr;
 	_commandList = nullptr;
-	_commandAllocator = nullptr;
+	_commandAllocators.fill(nullptr);
 	_commandQueue = nullptr;
 	_device = nullptr;
 	_dxgiFactory = nullptr;

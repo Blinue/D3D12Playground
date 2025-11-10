@@ -20,12 +20,15 @@ public:
 
 	HRESULT BeginFrame(
 		ID3D12Resource** frameTex,
-		CD3DX12_CPU_DESCRIPTOR_HANDLE& rtvHandle
+		CD3DX12_CPU_DESCRIPTOR_HANDLE& rtvHandle,
+		uint32_t& bufferIndex
 	) noexcept;
 
 	HRESULT EndFrame() noexcept;
 
 	HRESULT RecreateBuffers(uint32_t width, uint32_t height, winrt::AdvancedColorKind acKind) noexcept;
+
+	static constexpr inline uint32_t BUFFER_COUNT = 2;
 
 private:
 	HRESULT _WaitForGpu() noexcept;
@@ -39,15 +42,16 @@ private:
 
 	winrt::com_ptr<IDXGISwapChain4> _swapChain;
 	wil::unique_event_nothrow _frameLatencyWaitableObject;
-	std::array<winrt::com_ptr<ID3D12Resource>, 2> _renderTargets;
-	UINT _frameIndex = 0;
+	std::array<winrt::com_ptr<ID3D12Resource>, BUFFER_COUNT> _renderTargets;
+	UINT _bufferIndex = 0;
 
 	winrt::com_ptr<ID3D12DescriptorHeap> _rtvHeap;
 	UINT _rtvDescriptorSize = 0;
 
 	winrt::com_ptr<ID3D12Fence1> _fence;
 	wil::unique_event_nothrow _fenceEvent;
-	UINT64 _fenceValue = 0;
+	std::array<UINT64, BUFFER_COUNT> _bufferFenceValues{};
+	UINT64 _curFenceValue = 0;
 
 	bool _isRecreated = false;
 	bool _isframeLatencyWaited = false;

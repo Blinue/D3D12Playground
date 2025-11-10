@@ -42,7 +42,7 @@ private:
 	winrt::com_ptr<ID3D12Device5> _device;
 	winrt::com_ptr<ID3D12CommandQueue> _commandQueue;
 	
-	winrt::com_ptr<ID3D12CommandAllocator> _commandAllocator;
+	std::array<winrt::com_ptr<ID3D12CommandAllocator>, Presenter::BUFFER_COUNT> _commandAllocators;
 	winrt::com_ptr<ID3D12GraphicsCommandList> _commandList;
 	
 	winrt::com_ptr<ID3D12RootSignature> _rootSignature;
