@@ -43,16 +43,16 @@ private:
 	winrt::com_ptr<IDXGISwapChain4> _swapChain;
 	wil::unique_event_nothrow _frameLatencyWaitableObject;
 	std::array<winrt::com_ptr<ID3D12Resource>, BUFFER_COUNT> _renderTargets;
+	std::array<UINT64, BUFFER_COUNT> _bufferFenceValues{};
 	UINT _bufferIndex = 0;
 
 	winrt::com_ptr<ID3D12DescriptorHeap> _rtvHeap;
 	UINT _rtvDescriptorSize = 0;
 
 	winrt::com_ptr<ID3D12Fence1> _fence;
-	wil::unique_event_nothrow _fenceEvent;
-	std::array<UINT64, BUFFER_COUNT> _bufferFenceValues{};
 	UINT64 _curFenceValue = 0;
-
+	wil::unique_event_nothrow _fenceEvent;
+	
 	bool _isRecreated = false;
 	bool _isframeLatencyWaited = false;
 };
