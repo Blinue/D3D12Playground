@@ -43,6 +43,12 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 	}
 #endif
 
+	// 声明支持 TDR 恢复
+	[[maybe_unused]] static int _ = [] {
+		DXGIDeclareAdapterRemovalSupport();
+		return 0;
+	}();
+
 	if (FAILED(_CreateDXGIFactory())) {
 		return false;
 	}
@@ -253,6 +259,7 @@ bool Renderer::OnDisplayChanged() noexcept {
 				nullptr
 			))) {
 				// 改为使用显卡渲染
+				adapter = nullptr;
 				return _HandleDeviceLost();
 			}
 		}
