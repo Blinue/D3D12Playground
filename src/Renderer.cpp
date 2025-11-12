@@ -27,25 +27,32 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 
 	_hCurMonitor = MonitorFromWindow(hwndMain, MONITOR_DEFAULTTONEAREST);
 	
+	[[maybe_unused]] static int _ = [] {
 #ifdef _DEBUG
-	{
-		winrt::com_ptr<ID3D12Debug1> debugController;
-		if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)))) {
-			debugController->EnableDebugLayer();
-			// 启用 GPU-based validation，但会产生警告消息，而且这个消息无法轻易禁用
-			// debugController->SetEnableGPUBasedValidation(TRUE);
+		winrt::com_ptr<IDXGIInfoQueue> dxgiInfoQueue;
+		if (SUCCEEDED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&dxgiInfoQueue)))) {
+			// 发生错误时中断
+			dxgiInfoQueue->SetBreakOnSeverity(DXGI_DEBUG_ALL, DXGI_INFO_QUEUE_MESSAGE_SEVERITY_CORRUPTION, true);
+			dxgiInfoQueue->SetBreakOnSeverity(DXGI_DEBUG_ALL, DXGI_INFO_QUEUE_MESSAGE_SEVERITY_ERROR, true);
+		}
 
-			// Win11 开始支持生成默认名字，包含资源的基本属性
-			if (winrt::com_ptr<ID3D12Debug5> debugController5 = debugController.try_as<ID3D12Debug5>()) {
-				debugController5->SetEnableAutoName(TRUE);
+		{
+			winrt::com_ptr<ID3D12Debug1> debugController;
+			if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)))) {
+				debugController->EnableDebugLayer();
+				// 启用 GPU-based validation，但会产生警告消息，而且这个消息无法轻易禁用
+				// debugController->SetEnableGPUBasedValidation(TRUE);
+
+				// Win11 开始支持生成默认名字，包含资源的基本属性
+				if (winrt::com_ptr<ID3D12Debug5> debugController5 = debugController.try_as<ID3D12Debug5>()) {
+					debugController5->SetEnableAutoName(TRUE);
+				}
 			}
 		}
-	}
 #endif
-
-	// 声明支持 TDR 恢复
-	[[maybe_unused]] static int _ = [] {
+		// 声明支持 TDR 恢复
 		DXGIDeclareAdapterRemovalSupport();
+
 		return 0;
 	}();
 
@@ -272,15 +279,7 @@ HRESULT Renderer::_CreateDXGIFactory() noexcept {
 	UINT dxgiFactoryFlags = 0;
 #ifdef _DEBUG
 	dxgiFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
-
-	winrt::com_ptr<IDXGIInfoQueue> dxgiInfoQueue;
-	if (SUCCEEDED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&dxgiInfoQueue)))) {
-		// 发生错误时中断
-		dxgiInfoQueue->SetBreakOnSeverity(DXGI_DEBUG_ALL, DXGI_INFO_QUEUE_MESSAGE_SEVERITY_CORRUPTION, true);
-		dxgiInfoQueue->SetBreakOnSeverity(DXGI_DEBUG_ALL, DXGI_INFO_QUEUE_MESSAGE_SEVERITY_ERROR, true);
-	}
 #endif
-
 	return CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&_dxgiFactory));
 }
 
