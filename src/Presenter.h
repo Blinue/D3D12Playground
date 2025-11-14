@@ -54,5 +54,4 @@ private:
 	wil::unique_event_nothrow _fenceEvent;
 	
 	bool _isRecreated = false;
-	bool _isframeLatencyWaited = false;
 };

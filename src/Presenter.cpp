@@ -100,10 +100,7 @@ HRESULT Presenter::BeginFrame(
 	CD3DX12_CPU_DESCRIPTOR_HANDLE& rtvHandle,
 	uint32_t& bufferIndex
 ) noexcept {
-	if (!_isframeLatencyWaited) {
-		_frameLatencyWaitableObject.wait(1000);
-		_isframeLatencyWaited = true;
-	}
+	_frameLatencyWaitableObject.wait(1000);
 
 	if (_fence->GetCompletedValue() < _bufferFenceValues[_bufferIndex]) {
 		HRESULT hr = _fence->SetEventOnCompletion(_bufferFenceValues[_bufferIndex], _fenceEvent.get());
@@ -155,7 +152,6 @@ HRESULT Presenter::EndFrame() noexcept {
 	if (FAILED(hr)) {
 		return hr;
 	}
-	_isframeLatencyWaited = false;
 
 	hr = _commandQueue->Signal(_fence.get(), ++_curFenceValue);
 	if (FAILED(hr)) {
@@ -170,11 +166,6 @@ HRESULT Presenter::EndFrame() noexcept {
 
 HRESULT Presenter::RecreateBuffers(uint32_t width, uint32_t height, winrt::AdvancedColorKind acKind) noexcept {
 	_isRecreated = true;
-
-	if (!_isframeLatencyWaited) {
-		_frameLatencyWaitableObject.wait(1000);
-		_isframeLatencyWaited = true;
-	}
 
 	HRESULT hr = _WaitForGpu();
 	if (FAILED(hr)) {
