@@ -32,7 +32,7 @@ private:
 
 	HRESULT _UpdateAdvancedColor(bool onInit = false) noexcept;
 
-	HRESULT _CheckResult(HRESULT hr, bool onHandlingDeviceLost = false) noexcept;
+	HRESULT _CheckDeviceLost(HRESULT hr, bool onHandlingDeviceLost = false) noexcept;
 
 	bool _HandleDeviceLost() noexcept;
 

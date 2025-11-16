@@ -9,6 +9,9 @@
 #include <dxgidebug.h>
 #include <windows.graphics.display.interop.h>
 
+// 自定义 HRESULT 的方法参考自 https://learn.microsoft.com/en-us/windows/win32/com/codes-in-facility-itf
+#define S_RECOVERED MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_ITF, 0x200)
+
 static constexpr float SCENE_REFERRED_SDR_WHITE_LEVEL = 80.0f;
 
 struct Vertex {
@@ -133,19 +136,19 @@ bool Renderer::Render(bool onHandlingDeviceLost) noexcept {
 	ID3D12Resource* frameTex;
 	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle;
 	uint32_t frameIndex;
-	HRESULT hr = _CheckResult(_presenter->BeginFrame(&frameTex, rtvHandle, frameIndex), onHandlingDeviceLost);
-	if (hr != S_OK) {
-		return hr == S_FALSE;
+	HRESULT hr = _CheckDeviceLost(_presenter->BeginFrame(&frameTex, rtvHandle, frameIndex), onHandlingDeviceLost);
+	if (FAILED(hr) || hr == S_RECOVERED) {
+		return hr == S_RECOVERED;
 	}
 	
-	hr = _CheckResult(_commandAllocators[frameIndex]->Reset(), onHandlingDeviceLost);
-	if (hr != S_OK) {
-		return hr == S_FALSE;
+	hr = _CheckDeviceLost(_commandAllocators[frameIndex]->Reset(), onHandlingDeviceLost);
+	if (FAILED(hr) || hr == S_RECOVERED) {
+		return hr == S_RECOVERED;
 	}
 	
-	hr = _CheckResult(_commandList->Reset(_commandAllocators[frameIndex].get(), _pipelineState.get()), onHandlingDeviceLost);
-	if (hr != S_OK) {
-		return hr == S_FALSE;
+	hr = _CheckDeviceLost(_commandList->Reset(_commandAllocators[frameIndex].get(), _pipelineState.get()), onHandlingDeviceLost);
+	if (FAILED(hr) || hr == S_RECOVERED) {
+		return hr == S_RECOVERED;
 	}
 
 	_commandList->SetGraphicsRootSignature(_rootSignature.get());
@@ -188,9 +191,9 @@ bool Renderer::Render(bool onHandlingDeviceLost) noexcept {
 		_commandList->ResourceBarrier(1, &barrier);
 	}
 
-	hr = _CheckResult(_commandList->Close(), onHandlingDeviceLost);
-	if (hr != S_OK) {
-		return hr == S_FALSE;
+	hr = _CheckDeviceLost(_commandList->Close(), onHandlingDeviceLost);
+	if (FAILED(hr) || hr == S_RECOVERED) {
+		return hr == S_RECOVERED;
 	}
 
 	{
@@ -198,7 +201,7 @@ bool Renderer::Render(bool onHandlingDeviceLost) noexcept {
 		_commandQueue->ExecuteCommandLists(1, &t);
 	}
 
-	return SUCCEEDED(_CheckResult(_presenter->EndFrame(), onHandlingDeviceLost));
+	return SUCCEEDED(_CheckDeviceLost(_presenter->EndFrame(), onHandlingDeviceLost));
 }
 
 bool Renderer::OnSizeChanged(uint32_t width, uint32_t height, float dpiScale) noexcept {
@@ -211,15 +214,15 @@ bool Renderer::OnSizeChanged(uint32_t width, uint32_t height, float dpiScale) no
 	if (sizeChanged) {
 		_scissorRect = CD3DX12_RECT(0, 0, (LONG)width, (LONG)height);
 
-		HRESULT hr = _CheckResult(_presenter->RecreateBuffers(width, height, _curAcKind));
-		if (hr != S_OK) {
-			return hr == S_FALSE;
+		HRESULT hr = _CheckDeviceLost(_presenter->RecreateBuffers(width, height, _curAcKind));
+		if (FAILED(hr) || hr == S_RECOVERED) {
+			return hr == S_RECOVERED;
 		}
 	}
 
-	HRESULT hr = _CheckResult(_UpdateSizeDependentResources());
-	if (hr != S_OK) {
-		return hr == S_FALSE;
+	HRESULT hr = _CheckDeviceLost(_UpdateSizeDependentResources());
+	if (FAILED(hr) || hr == S_RECOVERED) {
+		return hr == S_RECOVERED;
 	}
 
 	return Render();
@@ -236,7 +239,7 @@ bool Renderer::OnWindowPosChanged() noexcept {
 	}
 	_hCurMonitor = hCurMonitor;
 
-	return SUCCEEDED(_CheckResult(_UpdateAdvancedColor()));
+	return SUCCEEDED(_CheckDeviceLost(_UpdateAdvancedColor()));
 }
 
 bool Renderer::OnDisplayChanged() noexcept {
@@ -272,7 +275,7 @@ bool Renderer::OnDisplayChanged() noexcept {
 		}
 	}
 
-	return _displayInfo || SUCCEEDED(_CheckResult(_UpdateAdvancedColor()));
+	return _displayInfo || SUCCEEDED(_CheckDeviceLost(_UpdateAdvancedColor()));
 }
 
 HRESULT Renderer::_CreateDXGIFactory() noexcept {
@@ -404,7 +407,7 @@ bool Renderer::_InitializeDisplayInformation() noexcept {
 	_acInfoChangedRevoker = _displayInfo.AdvancedColorInfoChanged(
 		winrt::auto_revoke,
 		[this](winrt::DisplayInformation const&, winrt::IInspectable const&) {
-			if (FAILED(_CheckResult(_UpdateAdvancedColor()))) {
+			if (FAILED(_CheckDeviceLost(_UpdateAdvancedColor()))) {
 				PostQuitMessage(1);
 			}
 		}
@@ -621,18 +624,18 @@ HRESULT Renderer::_UpdateAdvancedColor(bool onInit) noexcept {
 }
 
 // 设备丢失会立即尝试恢复，所以调用时注意局部变量不要引用 D3D 资源
-HRESULT Renderer::_CheckResult(HRESULT hr, bool onHandlingDeviceLost) noexcept {
+HRESULT Renderer::_CheckDeviceLost(HRESULT hr, bool onHandlingDeviceLost) noexcept {
 	if (SUCCEEDED(hr)) {
-		return S_OK;
+		return hr;
 	}
 
 	// 处理设备丢失时再次发生设备丢失则不再尝试恢复
 	if ((hr != DXGI_ERROR_DEVICE_REMOVED && hr != DXGI_ERROR_DEVICE_RESET) || onHandlingDeviceLost) {
-		return E_FAIL;
+		return hr;
 	}
 
 	// 设备丢失，需要重新初始化
-	return _HandleDeviceLost() ? S_FALSE : E_FAIL;
+	return _HandleDeviceLost() ? S_RECOVERED : hr;
 }
 
 bool Renderer::_HandleDeviceLost() noexcept {
