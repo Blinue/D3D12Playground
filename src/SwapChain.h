@@ -35,16 +35,14 @@ public:
 	HRESULT OnResizeEnded() noexcept;
 
 private:
-	HRESULT _WaitForGpu() noexcept;
-
 	HRESULT _LoadBufferResources(uint32_t bufferCount, bool useScRGB) noexcept;
 
-	static void _WaitForDwmComposition() noexcept;
+	HRESULT _WaitForGpu() noexcept;
 
 	ID3D12Device* _device = nullptr;
 	ID3D12CommandQueue* _commandQueue = nullptr;
 
-	winrt::com_ptr<IDXGISwapChain4> _swapChain;
+	winrt::com_ptr<IDXGISwapChain4> _dxgiSwapChain;
 	wil::unique_event_nothrow _frameLatencyWaitableObject;
 	std::vector<winrt::com_ptr<ID3D12Resource>> _renderTargets;
 	std::vector<UINT64> _bufferFenceValues;
@@ -57,6 +55,6 @@ private:
 	UINT64 _curFenceValue = 0;
 	wil::unique_event_nothrow _fenceEvent;
 	
-	bool _isRecreated = false;
+	bool _isRecreated = true;
 	bool _isResizing = false;
 };
