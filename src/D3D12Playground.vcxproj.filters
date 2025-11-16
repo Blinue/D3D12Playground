@@ -6,7 +6,7 @@
     <ClCompile Include="pch.cpp" />
     <ClCompile Include="DirectXHelper.cpp" />
     <ClCompile Include="Renderer.cpp" />
-    <ClCompile Include="Presenter.cpp" />
+    <ClCompile Include="SwapChain.cpp" />
     <ClCompile Include="Win32Helper.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -18,7 +18,7 @@
     <ClInclude Include="WindowBase.h" />
     <ClInclude Include="DirectXHelper.h" />
     <ClInclude Include="Renderer.h" />
-    <ClInclude Include="Presenter.h" />
+    <ClInclude Include="SwapChain.h" />
     <ClInclude Include="Win32Helper.h" />
   </ItemGroup>
   <ItemGroup>

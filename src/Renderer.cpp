@@ -77,13 +77,6 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 		}
 	}
 
-	for (winrt::com_ptr<ID3D12CommandAllocator>& commandAllocator : _commandAllocators) {
-		if (FAILED(_device->CreateCommandAllocator(
-			D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator)))) {
-			return false;
-		}
-	}
-
 	if (FAILED(_device->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
 		D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&_commandList)))) {
 		return false;
@@ -123,10 +116,18 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 		return false;
 	}
 
-	_presenter.emplace();
-	if (!_presenter->Initialize(_device.get(), _commandQueue.get(), _dxgiFactory.get(),
-		hwndMain, width, height, _curAcKind)) {
+	_swapChain.emplace();
+	if (!_swapChain->Initialize(_device.get(), _commandQueue.get(), _dxgiFactory.get(),
+		hwndMain, width, height, _curAcKind != winrt::AdvancedColorKind::StandardDynamicRange)) {
 		return false;
+	}
+
+	_commandAllocators.resize(_swapChain->GetBufferCount());
+	for (winrt::com_ptr<ID3D12CommandAllocator>& commandAllocator : _commandAllocators) {
+		if (FAILED(_device->CreateCommandAllocator(
+			D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator)))) {
+			return false;
+		}
 	}
 
 	return SUCCEEDED(_UpdateSizeDependentResources());
@@ -136,7 +137,7 @@ bool Renderer::Render(bool onHandlingDeviceLost) noexcept {
 	ID3D12Resource* frameTex;
 	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle;
 	uint32_t frameIndex;
-	HRESULT hr = _CheckDeviceLost(_presenter->BeginFrame(&frameTex, rtvHandle, frameIndex), onHandlingDeviceLost);
+	HRESULT hr = _CheckDeviceLost(_swapChain->BeginFrame(&frameTex, rtvHandle, frameIndex), onHandlingDeviceLost);
 	if (FAILED(hr) || hr == S_RECOVERED) {
 		return hr == S_RECOVERED;
 	}
@@ -201,7 +202,7 @@ bool Renderer::Render(bool onHandlingDeviceLost) noexcept {
 		_commandQueue->ExecuteCommandLists(1, &t);
 	}
 
-	return SUCCEEDED(_CheckDeviceLost(_presenter->EndFrame(), onHandlingDeviceLost));
+	return SUCCEEDED(_CheckDeviceLost(_swapChain->EndFrame(), onHandlingDeviceLost));
 }
 
 bool Renderer::OnSizeChanged(uint32_t width, uint32_t height, float dpiScale) noexcept {
@@ -214,7 +215,8 @@ bool Renderer::OnSizeChanged(uint32_t width, uint32_t height, float dpiScale) no
 	if (sizeChanged) {
 		_scissorRect = CD3DX12_RECT(0, 0, (LONG)width, (LONG)height);
 
-		HRESULT hr = _CheckDeviceLost(_presenter->RecreateBuffers(width, height, _curAcKind));
+		HRESULT hr = _CheckDeviceLost(_swapChain->RecreateBuffers(
+			width, height, _curAcKind != winrt::AdvancedColorKind::StandardDynamicRange));
 		if (FAILED(hr) || hr == S_RECOVERED) {
 			return hr == S_RECOVERED;
 		}
@@ -226,6 +228,14 @@ bool Renderer::OnSizeChanged(uint32_t width, uint32_t height, float dpiScale) no
 	}
 
 	return Render();
+}
+
+void Renderer::OnResizeStarted() noexcept {
+	_swapChain->OnResizeStarted();
+}
+
+bool Renderer::OnResizeEnded() noexcept {
+	return SUCCEEDED(_CheckDeviceLost(_swapChain->OnResizeEnded()));
 }
 
 bool Renderer::OnWindowPosChanged() noexcept {
@@ -546,7 +556,8 @@ HRESULT Renderer::_UpdateAdvancedColor(bool onInit) noexcept {
 
 	if (!onInit && shouldUpdateResources) {
 		// 等待 GPU 完成然后改变交换链格式
-		hr = _presenter->RecreateBuffers((uint32_t)_scissorRect.right, (uint32_t)_scissorRect.bottom, _curAcKind);
+		hr = _swapChain->RecreateBuffers((uint32_t)_scissorRect.right, (uint32_t)_scissorRect.bottom,
+			_curAcKind != winrt::AdvancedColorKind::StandardDynamicRange);
 		if (FAILED(hr)) {
 			return hr;
 		}
@@ -650,13 +661,13 @@ bool Renderer::_HandleDeviceLost() noexcept {
 
 void Renderer::_ReleaseD3DResources() noexcept {
 	// 首先等待 GPU
-	_presenter.reset();
+	_swapChain.reset();
 
 	_vertexBuffer = nullptr;
 	_pipelineState = nullptr;
 	_rootSignature = nullptr;
 	_commandList = nullptr;
-	_commandAllocators.fill(nullptr);
+	_commandAllocators.clear();
 	_commandQueue = nullptr;
 	_device = nullptr;
 	_dxgiFactory = nullptr;

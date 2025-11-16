@@ -1,12 +1,12 @@
 #pragma once
 
-class Presenter {
+class SwapChain {
 public:
-	Presenter() = default;
-	Presenter(const Presenter&) = delete;
-	Presenter(Presenter&&) = default;
+	SwapChain() = default;
+	SwapChain(const SwapChain&) = delete;
+	SwapChain(SwapChain&&) = default;
 
-	~Presenter();
+	~SwapChain();
 
 	bool Initialize(
 		ID3D12Device5* device,
@@ -15,7 +15,7 @@ public:
 		HWND hwndAttach,
 		uint32_t width,
 		uint32_t height,
-		winrt::AdvancedColorKind acKind
+		bool useScRGB
 	) noexcept;
 
 	HRESULT BeginFrame(
@@ -26,14 +26,18 @@ public:
 
 	HRESULT EndFrame() noexcept;
 
-	HRESULT RecreateBuffers(uint32_t width, uint32_t height, winrt::AdvancedColorKind acKind) noexcept;
+	HRESULT RecreateBuffers(uint32_t width, uint32_t height, bool useScRGB) noexcept;
 
-	static constexpr inline uint32_t BUFFER_COUNT = 2;
+	uint32_t GetBufferCount() const noexcept;
+
+	void OnResizeStarted() noexcept;
+
+	HRESULT OnResizeEnded() noexcept;
 
 private:
 	HRESULT _WaitForGpu() noexcept;
 
-	HRESULT _LoadBufferResources(winrt::AdvancedColorKind acKind) noexcept;
+	HRESULT _LoadBufferResources(uint32_t bufferCount, bool useScRGB) noexcept;
 
 	static void _WaitForDwmComposition() noexcept;
 
@@ -42,8 +46,8 @@ private:
 
 	winrt::com_ptr<IDXGISwapChain4> _swapChain;
 	wil::unique_event_nothrow _frameLatencyWaitableObject;
-	std::array<winrt::com_ptr<ID3D12Resource>, BUFFER_COUNT> _renderTargets;
-	std::array<UINT64, BUFFER_COUNT> _bufferFenceValues{};
+	std::vector<winrt::com_ptr<ID3D12Resource>> _renderTargets;
+	std::vector<UINT64> _bufferFenceValues;
 	UINT _bufferIndex = 0;
 
 	winrt::com_ptr<ID3D12DescriptorHeap> _rtvHeap;
@@ -54,4 +58,5 @@ private:
 	wil::unique_event_nothrow _fenceEvent;
 	
 	bool _isRecreated = false;
+	bool _isResizing = false;
 };

@@ -1,5 +1,5 @@
 #pragma once
-#include "Presenter.h"
+#include "SwapChain.h"
 
 class Renderer {
 public:
@@ -14,6 +14,10 @@ public:
 	bool Render(bool onHandlingDeviceLost = false) noexcept;
 
 	bool OnSizeChanged(uint32_t width, uint32_t height, float dpiScale) noexcept;
+
+	void OnResizeStarted() noexcept;
+
+	bool OnResizeEnded() noexcept;
 
 	bool OnWindowPosChanged() noexcept;
 
@@ -42,7 +46,7 @@ private:
 	winrt::com_ptr<ID3D12Device5> _device;
 	winrt::com_ptr<ID3D12CommandQueue> _commandQueue;
 	
-	std::array<winrt::com_ptr<ID3D12CommandAllocator>, Presenter::BUFFER_COUNT> _commandAllocators;
+	std::vector<winrt::com_ptr<ID3D12CommandAllocator>> _commandAllocators;
 	winrt::com_ptr<ID3D12GraphicsCommandList> _commandList;
 	
 	winrt::com_ptr<ID3D12RootSignature> _rootSignature;
@@ -53,7 +57,7 @@ private:
 	CD3DX12_VIEWPORT _viewport;
 	CD3DX12_RECT _scissorRect;
 
-	std::optional<Presenter> _presenter;
+	std::optional<SwapChain> _swapChain;
 
 	HWND _hwndMain = NULL;
 	winrt::DispatcherQueueController _dispatcherQueueController{ nullptr };

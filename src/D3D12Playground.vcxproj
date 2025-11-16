@@ -121,7 +121,7 @@
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader>Create</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="Presenter.cpp" />
+    <ClCompile Include="SwapChain.cpp" />
     <ClCompile Include="Renderer.cpp" />
     <ClCompile Include="Win32Helper.cpp" />
   </ItemGroup>
@@ -129,7 +129,7 @@
     <ClInclude Include="DirectXHelper.h" />
     <ClInclude Include="MainWindow.h" />
     <ClInclude Include="pch.h" />
-    <ClInclude Include="Presenter.h" />
+    <ClInclude Include="SwapChain.h" />
     <ClInclude Include="Renderer.h" />
     <ClInclude Include="Win32Helper.h" />
     <ClInclude Include="WindowBase.h" />

@@ -154,6 +154,28 @@ LRESULT MainWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) noex
 		}
 		return 0;
 	}
+	case WM_SYSCOMMAND:
+	{
+		// 区分接下来的 WM_ENTERSIZEMOVE 是调整大小还是移动
+		_isPreparingForResize = (wParam & 0xFFF0) == SC_SIZE;
+		break;
+	}
+	case WM_ENTERSIZEMOVE:
+	{
+		if (_isPreparingForResize) {
+			_isResizing = true;
+			_renderer->OnResizeStarted();
+		}
+		return 0;
+	}
+	case WM_EXITSIZEMOVE:
+	{
+		if (_isResizing) {
+			_isResizing = false;
+			_renderer->OnResizeEnded();
+		}
+		return 0;
+	}
 	case WM_DISPLAYCHANGE:
 	{
 		if (_renderer && !_renderer->OnDisplayChanged()) {
