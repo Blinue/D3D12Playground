@@ -42,6 +42,10 @@ private:
 
 	void _ReleaseD3DResources() noexcept;
 
+	uint32_t _width = 0;
+	uint32_t _height = 0;
+	float _dpiScale = 1.0f;
+
 	winrt::com_ptr<IDXGIFactory7> _dxgiFactory;
 	winrt::com_ptr<ID3D12Device5> _device;
 	winrt::com_ptr<ID3D12CommandQueue> _commandQueue;
@@ -53,9 +57,6 @@ private:
 	winrt::com_ptr<ID3D12PipelineState> _pipelineState;
 	winrt::com_ptr<ID3D12Resource> _vertexBuffer;
 	D3D12_VERTEX_BUFFER_VIEW _vertexBufferView{};
-
-	CD3DX12_VIEWPORT _viewport;
-	CD3DX12_RECT _scissorRect;
 
 	std::optional<SwapChain> _swapChain;
 
@@ -69,8 +70,6 @@ private:
 	float _maxLuminance = 1.0f;
 	// HDR 模式下 SDR 内容亮度缩放
 	float _sdrWhiteLevel = 1.0f;
-
-	float _dpiScale = 1.0f;
 
 	bool _isUsingWarp = false;
 };

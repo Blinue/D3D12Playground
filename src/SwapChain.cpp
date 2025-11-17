@@ -71,7 +71,7 @@ bool SwapChain::Initialize(
 		return false;
 	}
 
-	_bufferIndex = _dxgiSwapChain->GetCurrentBackBufferIndex();
+	_curBufferIndex = _dxgiSwapChain->GetCurrentBackBufferIndex();
 
 	dxgiFactory->MakeWindowAssociation(hwndAttach, DXGI_MWA_NO_ALT_ENTER);
 
@@ -95,8 +95,8 @@ bool SwapChain::Initialize(
 		return false;
 	}
 
-	_renderTargets.resize(bufferCount);
-	_bufferFenceValues.resize(bufferCount);
+	_frameBuffers.resize(bufferCount);
+	_frameBufferFenceValues.resize(bufferCount);
 	
 	return SUCCEEDED(_LoadBufferResources(bufferCount, useScRGB));
 }
@@ -108,8 +108,8 @@ HRESULT SwapChain::BeginFrame(
 ) noexcept {
 	_frameLatencyWaitableObject.wait(1000);
 
-	if (_fence->GetCompletedValue() < _bufferFenceValues[_bufferIndex]) {
-		HRESULT hr = _fence->SetEventOnCompletion(_bufferFenceValues[_bufferIndex], _fenceEvent.get());
+	if (_fence->GetCompletedValue() < _frameBufferFenceValues[_curBufferIndex]) {
+		HRESULT hr = _fence->SetEventOnCompletion(_frameBufferFenceValues[_curBufferIndex], _fenceEvent.get());
 		if (FAILED(hr)) {
 			return hr;
 		}
@@ -117,10 +117,10 @@ HRESULT SwapChain::BeginFrame(
 		_fenceEvent.wait();
 	}
 
-	*frameTex = _renderTargets[_bufferIndex].get();
+	*frameTex = _frameBuffers[_curBufferIndex].get();
 	rtvHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(
-		_rtvHeap->GetCPUDescriptorHandleForHeapStart(), _bufferIndex, _rtvDescriptorSize);
-	bufferIndex = _bufferIndex;
+		_rtvHeap->GetCPUDescriptorHandleForHeapStart(), _curBufferIndex, _rtvDescriptorSize);
+	bufferIndex = _curBufferIndex;
 
 	return S_OK;
 }
@@ -215,9 +215,9 @@ HRESULT SwapChain::EndFrame() noexcept {
 	if (FAILED(hr)) {
 		return hr;
 	}
-	_bufferFenceValues[_bufferIndex] = _curFenceValue;
+	_frameBufferFenceValues[_curBufferIndex] = _curFenceValue;
 
-	_bufferIndex = _dxgiSwapChain->GetCurrentBackBufferIndex();
+	_curBufferIndex = _dxgiSwapChain->GetCurrentBackBufferIndex();
 
 	return S_OK;
 }
@@ -231,7 +231,7 @@ HRESULT SwapChain::RecreateBuffers(uint32_t width, uint32_t height, bool useScRG
 	// 调整大小期间只用两个后缓冲以提高流畅度并减少边缘闪烁
 	const uint32_t bufferCount = _isResizing ? BUFFER_COUNT_DURING_RESIZE : GetBufferCount();
 
-	std::fill(_renderTargets.begin(), _renderTargets.end(), nullptr);
+	std::fill(_frameBuffers.begin(), _frameBuffers.end(), nullptr);
 
 	hr = _dxgiSwapChain->ResizeBuffers(
 		bufferCount, width, height,
@@ -255,7 +255,7 @@ HRESULT SwapChain::RecreateBuffers(uint32_t width, uint32_t height, bool useScRG
 		return hr;
 	}
 
-	_bufferIndex = _dxgiSwapChain->GetCurrentBackBufferIndex();
+	_curBufferIndex = _dxgiSwapChain->GetCurrentBackBufferIndex();
 
 	return _LoadBufferResources(bufferCount, useScRGB);
 }
@@ -290,7 +290,7 @@ HRESULT SwapChain::OnResizeEnded() noexcept {
 HRESULT SwapChain::_LoadBufferResources(uint32_t bufferCount, bool useScRGB) noexcept {
 	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(_rtvHeap->GetCPUDescriptorHandleForHeapStart());
 	for (uint32_t i = 0; i < bufferCount; ++i) {
-		HRESULT hr = _dxgiSwapChain->GetBuffer(i, IID_PPV_ARGS(&_renderTargets[i]));
+		HRESULT hr = _dxgiSwapChain->GetBuffer(i, IID_PPV_ARGS(&_frameBuffers[i]));
 		if (FAILED(hr)) {
 			return hr;
 		}
@@ -299,7 +299,7 @@ HRESULT SwapChain::_LoadBufferResources(uint32_t bufferCount, bool useScRGB) noe
 			.Format = useScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
 			.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D
 		};
-		_device->CreateRenderTargetView(_renderTargets[i].get(), &rtvDesc, rtvHandle);
+		_device->CreateRenderTargetView(_frameBuffers[i].get(), &rtvDesc, rtvHandle);
 		rtvHandle.Offset(1, _rtvDescriptorSize);
 	}
 

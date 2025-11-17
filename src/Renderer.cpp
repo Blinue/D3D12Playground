@@ -10,7 +10,7 @@
 #include <windows.graphics.display.interop.h>
 
 // 自定义 HRESULT 的方法参考自 https://learn.microsoft.com/en-us/windows/win32/com/codes-in-facility-itf
-#define S_RECOVERED MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_ITF, 0x200)
+static constexpr HRESULT S_RECOVERED = MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_ITF, 0x200);
 
 static constexpr float SCENE_REFERRED_SDR_WHITE_LEVEL = 80.0f;
 
@@ -26,7 +26,8 @@ Renderer::~Renderer() {
 bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float dpiScale) noexcept {
 	_hwndMain = hwndMain;
 	_dpiScale = dpiScale;
-	_scissorRect = CD3DX12_RECT(0, 0, (LONG)width, (LONG)height);
+	_width = width;
+	_height = height;
 
 	_hCurMonitor = MonitorFromWindow(hwndMain, MONITOR_DEFAULTTONEAREST);
 	
@@ -161,9 +162,15 @@ bool Renderer::Render(bool onHandlingDeviceLost) noexcept {
 		_commandList->SetGraphicsRoot32BitConstants(0, 1, &boost, 0);
 	}
 
-	_commandList->RSSetViewports(1, &_viewport);
-	_commandList->RSSetScissorRects(1, &_scissorRect);
-
+	{
+		CD3DX12_VIEWPORT viewport(0.0f, 0.0f, (float)_width, (float)_height);
+		_commandList->RSSetViewports(1, &viewport);
+	}
+	{
+		CD3DX12_RECT scissorRect(0, 0, (LONG)_width, (LONG)_height);
+		_commandList->RSSetScissorRects(1, &scissorRect);
+	}
+	
 	{
 		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
 			frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
@@ -206,14 +213,15 @@ bool Renderer::Render(bool onHandlingDeviceLost) noexcept {
 }
 
 bool Renderer::OnSizeChanged(uint32_t width, uint32_t height, float dpiScale) noexcept {
-	const bool sizeChanged = width != (uint32_t)_scissorRect.right || height != (uint32_t)_scissorRect.bottom;
+	const bool sizeChanged = width != _width || height != _height;
 	if (!sizeChanged && dpiScale == _dpiScale) {
 		return true;
 	}
 	_dpiScale = dpiScale;
 
 	if (sizeChanged) {
-		_scissorRect = CD3DX12_RECT(0, 0, (LONG)width, (LONG)height);
+		_width = width;
+		_height = height;
 
 		HRESULT hr = _CheckDeviceLost(_swapChain->RecreateBuffers(
 			width, height, _curAcKind != winrt::AdvancedColorKind::StandardDynamicRange));
@@ -275,7 +283,7 @@ bool Renderer::OnDisplayChanged() noexcept {
 			if (SUCCEEDED(D3D12CreateDevice(
 				adapter.get(),
 				D3D_FEATURE_LEVEL_11_0,
-				__uuidof(ID3D12Device),
+				winrt::guid_of<ID3D12Device>(),
 				nullptr
 			))) {
 				// 改为使用显卡渲染
@@ -338,8 +346,8 @@ bool Renderer::_CreateD3DDevice() noexcept {
 }
 
 HRESULT Renderer::_UpdateSizeDependentResources() noexcept {
-	const float squareWidth = 200.0f * _dpiScale / _scissorRect.right * 2.0f;
-	const float squareHeight = 200.0f * _dpiScale / _scissorRect.bottom * 2.0f;
+	const float squareWidth = 200.0f * _dpiScale / _width * 2.0f;
+	const float squareHeight = 200.0f * _dpiScale / _height * 2.0f;
 	Vertex triangleVertices[] = {
 		// 左上
 		{ { -1.0f, 1.0f }, { 0.0f, 0.0f } },
@@ -380,8 +388,6 @@ HRESULT Renderer::_UpdateSizeDependentResources() noexcept {
 	}
 	memcpy(pVertexDataBegin, triangleVertices, sizeof(triangleVertices));
 	_vertexBuffer->Unmap(0, nullptr);
-
-	_viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, (float)_scissorRect.right, (float)_scissorRect.bottom);
 
 	return S_OK;
 }
@@ -556,7 +562,7 @@ HRESULT Renderer::_UpdateAdvancedColor(bool onInit) noexcept {
 
 	if (!onInit && shouldUpdateResources) {
 		// 等待 GPU 完成然后改变交换链格式
-		hr = _swapChain->RecreateBuffers((uint32_t)_scissorRect.right, (uint32_t)_scissorRect.bottom,
+		hr = _swapChain->RecreateBuffers(_width, _height,
 			_curAcKind != winrt::AdvancedColorKind::StandardDynamicRange);
 		if (FAILED(hr)) {
 			return hr;
@@ -652,7 +658,7 @@ HRESULT Renderer::_CheckDeviceLost(HRESULT hr, bool onHandlingDeviceLost) noexce
 bool Renderer::_HandleDeviceLost() noexcept {
 	_ReleaseD3DResources();
 	
-	if (!Initialize(_hwndMain, (uint32_t)_scissorRect.right, (uint32_t)_scissorRect.bottom, _dpiScale)) {
+	if (!Initialize(_hwndMain, _width, _height, _dpiScale)) {
 		return false;
 	}
 
