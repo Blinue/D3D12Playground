@@ -18,6 +18,8 @@ public:
 		bool useScRGB
 	) noexcept;
 
+	uint32_t GetBufferCount() const noexcept;
+
 	HRESULT BeginFrame(
 		ID3D12Resource** frameTex,
 		CD3DX12_CPU_DESCRIPTOR_HANDLE& rtvHandle,
@@ -27,8 +29,6 @@ public:
 	HRESULT EndFrame() noexcept;
 
 	HRESULT RecreateBuffers(uint32_t width, uint32_t height, bool useScRGB) noexcept;
-
-	uint32_t GetBufferCount() const noexcept;
 
 	void OnResizeStarted() noexcept;
 

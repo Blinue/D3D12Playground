@@ -101,6 +101,10 @@ bool SwapChain::Initialize(
 	return SUCCEEDED(_LoadBufferResources(bufferCount, useScRGB));
 }
 
+uint32_t SwapChain::GetBufferCount() const noexcept {
+	return 3;
+}
+
 HRESULT SwapChain::BeginFrame(
 	ID3D12Resource** frameTex,
 	CD3DX12_CPU_DESCRIPTOR_HANDLE& rtvHandle,
@@ -258,10 +262,6 @@ HRESULT SwapChain::RecreateBuffers(uint32_t width, uint32_t height, bool useScRG
 	_curBufferIndex = _dxgiSwapChain->GetCurrentBackBufferIndex();
 
 	return _LoadBufferResources(bufferCount, useScRGB);
-}
-
-uint32_t SwapChain::GetBufferCount() const noexcept {
-	return 3;
 }
 
 void SwapChain::OnResizeStarted() noexcept {

@@ -6,7 +6,9 @@
 #include "shaders/sRGB_PS.h"
 #include "Win32Helper.h"
 #include <dispatcherqueue.h>
+#ifdef _DEBUG
 #include <dxgidebug.h>
+#endif
 #include <windows.graphics.display.interop.h>
 
 // 自定义 HRESULT 的方法参考自 https://learn.microsoft.com/en-us/windows/win32/com/codes-in-facility-itf
