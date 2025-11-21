@@ -53,7 +53,6 @@ private:
 
 	winrt::com_ptr<ID3D12Fence1> _fence;
 	uint64_t _curFenceValue = 0;
-	wil::unique_event_nothrow _fenceEvent;
 	
 	bool _isRecreated = true;
 	bool _isResizing = false;
