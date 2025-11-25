@@ -573,13 +573,20 @@ HRESULT Renderer::_UpdateAdvancedColor(bool onInit) noexcept {
 
 	if (onInit || shouldUpdateResources) {
 		// 创建根签名
+		D3D12_FEATURE_DATA_ROOT_SIGNATURE featureData = { .HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1 };
+		if (FAILED(_device->CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &featureData, sizeof(featureData)))) {
+			featureData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
+		}
+
 		winrt::com_ptr<ID3DBlob> signature;
 		winrt::com_ptr<ID3DBlob> error;
 
 		if (_curAcKind == winrt::AdvancedColorKind::StandardDynamicRange) {
-			CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(0, (D3D12_ROOT_PARAMETER1*)nullptr, 0, nullptr,
-				D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
-			hr = D3D12SerializeVersionedRootSignature(&rootSignatureDesc, signature.put(), error.put());
+			CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
+				0, (D3D12_ROOT_PARAMETER1*)nullptr, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+			hr = D3DX12SerializeVersionedRootSignature(
+				&rootSignatureDesc, featureData.HighestVersion, signature.put(), error.put());
 			if (FAILED(hr)) {
 				return hr;
 			}
@@ -591,14 +598,16 @@ HRESULT Renderer::_UpdateAdvancedColor(bool onInit) noexcept {
 				},
 				.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL
 			};
-			CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(1, &rootParam, 0, nullptr,
-				D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
-			hr = D3D12SerializeVersionedRootSignature(&rootSignatureDesc, signature.put(), error.put());
+			CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
+				1, &rootParam, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+			hr = D3DX12SerializeVersionedRootSignature(
+				&rootSignatureDesc, featureData.HighestVersion, signature.put(), error.put());
 			if (FAILED(hr)) {
 				return hr;
 			}
 		}
-
+		
 		hr = _device->CreateRootSignature(
 			0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&_rootSignature));
 		if (FAILED(hr)) {
