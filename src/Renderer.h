@@ -46,10 +46,12 @@ private:
 	uint32_t _height = 0;
 	float _dpiScale = 1.0f;
 
+	D3D_ROOT_SIGNATURE_VERSION _rootSignatureVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
+
 	winrt::com_ptr<IDXGIFactory7> _dxgiFactory;
 	winrt::com_ptr<ID3D12Device5> _device;
 	winrt::com_ptr<ID3D12CommandQueue> _commandQueue;
-	
+
 	std::vector<winrt::com_ptr<ID3D12CommandAllocator>> _commandAllocators;
 	winrt::com_ptr<ID3D12GraphicsCommandList> _commandList;
 	

@@ -70,6 +70,15 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 		return false;
 	}
 
+	// 检查根签名版本
+	{
+		D3D12_FEATURE_DATA_ROOT_SIGNATURE featureData = { .HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1 };
+		if (FAILED(_device->CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &featureData, sizeof(featureData)))) {
+			return false;
+		}
+		_rootSignatureVersion = featureData.HighestVersion;
+	}
+
 	{
 		D3D12_COMMAND_QUEUE_DESC queueDesc{
 			.Type = D3D12_COMMAND_LIST_TYPE_DIRECT,
@@ -573,11 +582,6 @@ HRESULT Renderer::_UpdateAdvancedColor(bool onInit) noexcept {
 
 	if (onInit || shouldUpdateResources) {
 		// 创建根签名
-		D3D12_FEATURE_DATA_ROOT_SIGNATURE featureData = { .HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1 };
-		if (FAILED(_device->CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &featureData, sizeof(featureData)))) {
-			featureData.HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
-		}
-
 		winrt::com_ptr<ID3DBlob> signature;
 		winrt::com_ptr<ID3DBlob> error;
 
@@ -586,7 +590,7 @@ HRESULT Renderer::_UpdateAdvancedColor(bool onInit) noexcept {
 				0, (D3D12_ROOT_PARAMETER1*)nullptr, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
 			hr = D3DX12SerializeVersionedRootSignature(
-				&rootSignatureDesc, featureData.HighestVersion, signature.put(), error.put());
+				&rootSignatureDesc, _rootSignatureVersion, signature.put(), error.put());
 			if (FAILED(hr)) {
 				return hr;
 			}
@@ -602,7 +606,7 @@ HRESULT Renderer::_UpdateAdvancedColor(bool onInit) noexcept {
 				1, &rootParam, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
 			hr = D3DX12SerializeVersionedRootSignature(
-				&rootSignatureDesc, featureData.HighestVersion, signature.put(), error.put());
+				&rootSignatureDesc, _rootSignatureVersion, signature.put(), error.put());
 			if (FAILED(hr)) {
 				return hr;
 			}
