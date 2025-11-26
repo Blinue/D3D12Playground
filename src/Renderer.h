@@ -57,6 +57,7 @@ private:
 	
 	winrt::com_ptr<ID3D12RootSignature> _rootSignature;
 	winrt::com_ptr<ID3D12PipelineState> _pipelineState;
+	winrt::com_ptr<ID3D12Resource> _vertexUploadBuffer;
 	winrt::com_ptr<ID3D12Resource> _vertexBuffer;
 	D3D12_VERTEX_BUFFER_VIEW _vertexBufferView{};
 
@@ -74,4 +75,6 @@ private:
 	float _sdrWhiteLevel = 1.0f;
 
 	bool _isUsingWarp = false;
+	bool _shouldUpdateSizeDependentResources = true;
+	bool _isVertexBufferInitialized = false;
 };

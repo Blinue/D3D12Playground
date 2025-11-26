@@ -7,7 +7,9 @@
 static constexpr uint32_t BUFFER_COUNT_DURING_RESIZE = 2;
 
 SwapChain::~SwapChain() {
-	_WaitForGpu();
+	if (_fence) {
+		_WaitForGpu();
+	}
 }
 
 bool SwapChain::Initialize(
@@ -301,10 +303,6 @@ HRESULT SwapChain::_LoadBufferResources(uint32_t bufferCount, bool useScRGB) noe
 }
 
 HRESULT SwapChain::_WaitForGpu() noexcept {
-	if (!_fence) {
-		return S_OK;
-	}
-
 	HRESULT hr = _commandQueue->Signal(_fence.get(), ++_curFenceValue);
 	if (FAILED(hr)) {
 		return hr;

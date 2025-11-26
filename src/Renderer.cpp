@@ -47,7 +47,7 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 			if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)))) {
 				debugController->EnableDebugLayer();
 				// 启用 GPU-based validation，但会产生警告消息，而且这个消息无法轻易禁用
-				// debugController->SetEnableGPUBasedValidation(TRUE);
+				debugController->SetEnableGPUBasedValidation(TRUE);
 
 				// Win11 开始支持生成默认名字，包含资源的基本属性
 				if (winrt::com_ptr<ID3D12Debug5> debugController5 = debugController.try_as<ID3D12Debug5>()) {
@@ -97,10 +97,6 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 	{
 		const UINT vertexBufferSize = sizeof(Vertex) * 22;
 
-		// Note: using upload heaps to transfer static data like vert buffers is not 
-		// recommended. Every time the GPU needs it, the upload heap will be marshalled 
-		// over. Please read up on Default Heap usage. An upload heap is used here for 
-		// code simplicity and because there are very few verts to actually transfer.
 		CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_UPLOAD);
 		CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
 		if (FAILED(_device->CreateCommittedResource(
@@ -108,6 +104,18 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 			D3D12_HEAP_FLAG_NONE,
 			&bufferDesc,
 			D3D12_RESOURCE_STATE_GENERIC_READ,
+			nullptr,
+			IID_PPV_ARGS(&_vertexUploadBuffer)
+		))) {
+			return false;
+		}
+
+		heapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
+		if (FAILED(_device->CreateCommittedResource(
+			&heapProperties,
+			D3D12_HEAP_FLAG_NONE,
+			&bufferDesc,
+			D3D12_RESOURCE_STATE_COMMON,
 			nullptr,
 			IID_PPV_ARGS(&_vertexBuffer)
 		))) {
@@ -142,7 +150,7 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 		}
 	}
 
-	return SUCCEEDED(_UpdateSizeDependentResources());
+	return true;
 }
 
 bool Renderer::Render(bool onHandlingDeviceLost) noexcept {
@@ -162,6 +170,15 @@ bool Renderer::Render(bool onHandlingDeviceLost) noexcept {
 	hr = _CheckDeviceLost(_commandList->Reset(_commandAllocators[frameIndex].get(), _pipelineState.get()), onHandlingDeviceLost);
 	if (FAILED(hr) || hr == S_RECOVERED) {
 		return hr == S_RECOVERED;
+	}
+
+	if (_shouldUpdateSizeDependentResources) {
+		_shouldUpdateSizeDependentResources = false;
+
+		hr = _UpdateSizeDependentResources();
+		if (FAILED(hr) || hr == S_RECOVERED) {
+			return hr == S_RECOVERED;
+		}
 	}
 
 	_commandList->SetGraphicsRootSignature(_rootSignature.get());
@@ -224,24 +241,18 @@ bool Renderer::Render(bool onHandlingDeviceLost) noexcept {
 }
 
 bool Renderer::OnSizeChanged(uint32_t width, uint32_t height, float dpiScale) noexcept {
-	const bool sizeChanged = width != _width || height != _height;
-	if (!sizeChanged && dpiScale == _dpiScale) {
+	if (width == _width && height == _height && dpiScale == _dpiScale) {
 		return true;
 	}
+	
+	_width = width;
+	_height = height;
 	_dpiScale = dpiScale;
+	_shouldUpdateSizeDependentResources = true;
 
-	if (sizeChanged) {
-		_width = width;
-		_height = height;
-
-		HRESULT hr = _CheckDeviceLost(_swapChain->RecreateBuffers(
-			width, height, _curAcKind != winrt::AdvancedColorKind::StandardDynamicRange));
-		if (FAILED(hr) || hr == S_RECOVERED) {
-			return hr == S_RECOVERED;
-		}
-	}
-
-	HRESULT hr = _CheckDeviceLost(_UpdateSizeDependentResources());
+	// 会等待 GPU
+	HRESULT hr = _CheckDeviceLost(_swapChain->RecreateBuffers(
+		width, height, _curAcKind != winrt::AdvancedColorKind::StandardDynamicRange));
 	if (FAILED(hr) || hr == S_RECOVERED) {
 		return hr == S_RECOVERED;
 	}
@@ -356,6 +367,7 @@ bool Renderer::_CreateD3DDevice() noexcept {
 	return false;
 }
 
+// 调用前需等待 GPU 完成
 HRESULT Renderer::_UpdateSizeDependentResources() noexcept {
 	const float squareWidth = 200.0f * _dpiScale / _width * 2.0f;
 	const float squareHeight = 200.0f * _dpiScale / _height * 2.0f;
@@ -393,13 +405,27 @@ HRESULT Renderer::_UpdateSizeDependentResources() noexcept {
 
 	void* pVertexDataBegin = nullptr;
 	CD3DX12_RANGE readRange(0, 0);
-	HRESULT hr = _vertexBuffer->Map(0, &readRange, &pVertexDataBegin);
+	HRESULT hr = _vertexUploadBuffer->Map(0, &readRange, &pVertexDataBegin);
 	if (FAILED(hr)) {
 		return hr;
 	}
 	memcpy(pVertexDataBegin, triangleVertices, sizeof(triangleVertices));
-	_vertexBuffer->Unmap(0, nullptr);
+	_vertexUploadBuffer->Unmap(0, nullptr);
 
+	D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+		_vertexBuffer.get(),
+		_isVertexBufferInitialized ? D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER : D3D12_RESOURCE_STATE_COMMON,
+		D3D12_RESOURCE_STATE_COPY_DEST
+	);
+	_commandList->ResourceBarrier(1, &barrier);
+
+	_commandList->CopyResource(_vertexBuffer.get(), _vertexUploadBuffer.get());
+
+	barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+	barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+	_commandList->ResourceBarrier(1, &barrier);
+
+	_isVertexBufferInitialized = true;
 	return S_OK;
 }
 
@@ -684,6 +710,7 @@ void Renderer::_ReleaseD3DResources() noexcept {
 	// 首先等待 GPU
 	_swapChain.reset();
 
+	_vertexUploadBuffer = nullptr;
 	_vertexBuffer = nullptr;
 	_pipelineState = nullptr;
 	_rootSignature = nullptr;
@@ -692,6 +719,9 @@ void Renderer::_ReleaseD3DResources() noexcept {
 	_commandQueue = nullptr;
 	_device = nullptr;
 	_dxgiFactory = nullptr;
+
+	_shouldUpdateSizeDependentResources = true;
+	_isVertexBufferInitialized = false;
 	
 #ifdef _DEBUG
 	// 检查是否所有 D3D 资源都已释放。和 ID3D12DebugDevice::ReportLiveDeviceObjects 相比，
