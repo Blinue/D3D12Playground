@@ -110,6 +110,12 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 			return false;
 		}
 
+		// 无需解除映射
+		D3D12_RANGE readRange{};
+		if (FAILED(_vertexUploadBuffer->Map(0, &readRange, &_vertexUploadBufferData))) {
+			return false;
+		}
+
 		heapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
 		if (FAILED(_device->CreateCommittedResource(
 			&heapProperties,
@@ -403,14 +409,7 @@ HRESULT Renderer::_UpdateSizeDependentResources() noexcept {
 		{ { -1.0f + squareWidth, -1.0f }, { 1.0f, 0.0f } },
 	};
 
-	void* pVertexDataBegin = nullptr;
-	CD3DX12_RANGE readRange(0, 0);
-	HRESULT hr = _vertexUploadBuffer->Map(0, &readRange, &pVertexDataBegin);
-	if (FAILED(hr)) {
-		return hr;
-	}
-	memcpy(pVertexDataBegin, triangleVertices, sizeof(triangleVertices));
-	_vertexUploadBuffer->Unmap(0, nullptr);
+	memcpy(_vertexUploadBufferData, triangleVertices, sizeof(triangleVertices));
 
 	D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
 		_vertexBuffer.get(),
