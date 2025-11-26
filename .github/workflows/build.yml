@@ -1,0 +1,35 @@
+name: build
+
+on:
+  push:
+    paths: [ '.github/workflows/build.yml', 'D3D12Playground.slnx', 'src/**' ]
+  pull_request:
+    paths: [ '.github/workflows/build.yml', 'D3D12Playground.slnx', 'src/**' ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        compiler: ["MSVC", "ClangCL"]
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v6
+
+    - name: Setup MSBuild.exe
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Build
+      if: matrix.compiler == 'MSVC'
+      run: msbuild D3D12Playground.slnx /restore "/p:Platform=x64;Configuration=Release;RestorePackagesConfig=true;DisablePDB=true"
+    
+    - name: Build
+      if: matrix.compiler == 'ClangCL'
+      run: msbuild D3D12Playground.slnx /restore "/p:Platform=x64;Configuration=Release;RestorePackagesConfig=true;DisablePDB=true;PlatformToolset=ClangCL"
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v5
+      with:
+        name: D3D12Playground-${{ matrix.compiler }}
+        path: bin\x64\Release

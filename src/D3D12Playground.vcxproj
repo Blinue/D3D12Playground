@@ -35,8 +35,8 @@
     <OutDir>$(SolutionDir)\bin\$(Platform)\$(Configuration)\</OutDir>
     <GeneratedFilesDir>$(IntDir)\Generated Files\</GeneratedFilesDir>
     <!-- Debug 配置下使用 Agility SDK 辅助调试 -->
-	<Microsoft_Direct3D_D3D12_SkipLibraryCopy Condition="'$(Configuration)' == 'Release'">true</Microsoft_Direct3D_D3D12_SkipLibraryCopy>
-	<Microsoft_Direct3D_D3D12_SkipDebugLayerCopy Condition="'$(Configuration)' == 'Release'">true</Microsoft_Direct3D_D3D12_SkipDebugLayerCopy>
+    <Microsoft_Direct3D_D3D12_SkipLibraryCopy Condition="'$(Configuration)' == 'Release'">true</Microsoft_Direct3D_D3D12_SkipLibraryCopy>
+    <Microsoft_Direct3D_D3D12_SkipDebugLayerCopy Condition="'$(Configuration)' == 'Release'">true</Microsoft_Direct3D_D3D12_SkipDebugLayerCopy>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Label="Configuration">
@@ -85,7 +85,8 @@
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <GenerateDebugInformation Condition="'$(DisablePDB)' == true">false</GenerateDebugInformation>
+      <GenerateDebugInformation Condition="'$(DisablePDB)' != true">true</GenerateDebugInformation>
       <AdditionalDependencies>UxTheme.lib;Dwmapi.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <FxCompile>
