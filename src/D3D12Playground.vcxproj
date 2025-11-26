@@ -41,7 +41,8 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset Condition="$([System.String]::new('$(MSBuildVersion)').StartsWith('17'))">v143</PlatformToolset>
+    <PlatformToolset Condition="!$([System.String]::new('$(MSBuildVersion)').StartsWith('17'))">v145</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
     <PreferredToolArchitecture Condition="'$(PreferredToolArchitecture)' == ''">x64</PreferredToolArchitecture>
     <UseDebugLibraries Condition="'$(Configuration)' == 'Debug'">true</UseDebugLibraries>
@@ -82,6 +83,8 @@
       <AdditionalOptions Condition="'$(PlatformToolset)' == 'ClangCL'">/clang:-Wno-missing-designated-field-initializers /clang:-Wno-missing-field-initializers /clang:-fstrict-vtable-pointers /clang:-funsafe-math-optimizations /clang:-fno-math-errno %(AdditionalOptions)</AdditionalOptions>
       <!-- -mcx16: 启用 CX16 指令，Windows 从 8.1 开始要求 CPU 支持它 -->
       <AdditionalOptions Condition="'$(PlatformToolset)' == 'ClangCL' And '$(Platform)' == 'x64'">/clang:-mcx16 %(AdditionalOptions)</AdditionalOptions>
+      <!-- 禁用 cppwinrt 生成的头文件中的编译警告 -->
+      <AdditionalOptions Condition="'$(PlatformToolset)' == 'ClangCL'">/clang:-isystem /clang:"$(GeneratedFilesDir)\" %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
