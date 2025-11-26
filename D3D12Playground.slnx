@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="ARM64" />
+    <Platform Name="x64" />
+  </Configurations>
+  <Project Path="src/D3D12Playground.vcxproj" Id="796e8432-73cf-4532-86be-886bc0f10077" />
+</Solution>

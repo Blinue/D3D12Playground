@@ -3,9 +3,17 @@
   <Import Project="..\packages\Microsoft.Direct3D.D3D12.1.618.3\build\native\Microsoft.Direct3D.D3D12.props" Condition="Exists('..\packages\Microsoft.Direct3D.D3D12.1.618.3\build\native\Microsoft.Direct3D.D3D12.props')" />
   <Import Project="..\packages\Microsoft.Windows.CppWinRT.2.0.250303.1\build\native\Microsoft.Windows.CppWinRT.props" Condition="Exists('..\packages\Microsoft.Windows.CppWinRT.2.0.250303.1\build\native\Microsoft.Windows.CppWinRT.props')" />
   <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|ARM64">
+      <Configuration>Debug</Configuration>
+      <Platform>ARM64</Platform>
+    </ProjectConfiguration>
     <ProjectConfiguration Include="Debug|x64">
       <Configuration>Debug</Configuration>
       <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|ARM64">
+      <Configuration>Release</Configuration>
+      <Platform>ARM64</Platform>
     </ProjectConfiguration>
     <ProjectConfiguration Include="Release|x64">
       <Configuration>Release</Configuration>
@@ -45,10 +53,7 @@
   </ImportGroup>
   <ImportGroup Label="Shared">
   </ImportGroup>
-  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-  </ImportGroup>
-  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+  <ImportGroup Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
@@ -70,7 +75,14 @@
       <!-- /Zc:__cplusplus: 更新 __cplusplus 宏 -->
       <!-- /volatile:iso: 禁用 volatile 的语义扩展 -->
       <!-- /await:strict: 禁用协程的非标准语言扩展 -->
-      <AdditionalOptions>/bigobj /utf-8 /Zc:__cplusplus /volatile:iso /await:strict %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/bigobj /utf-8 /Zc:__cplusplus /volatile:iso %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(PlatformToolset)' != 'ClangCL'">/await:strict %(AdditionalOptions)</AdditionalOptions>
+      <!-- -fstrict-vtable-pointers: 缓存虚表指针，这要求不能通过非法手段改变对象的动态类型 -->
+      <!-- -funsafe-math-optimizations: 以降低精度为代价提高浮点运算速度 -->
+      <!-- -fno-math-errno: 浮点操作不设置 errno，这使一些数学函数可以内联 -->
+      <AdditionalOptions Condition="'$(PlatformToolset)' == 'ClangCL'">/clang:-Wno-missing-designated-field-initializers /clang:-Wno-missing-field-initializers /clang:-fstrict-vtable-pointers /clang:-funsafe-math-optimizations /clang:-fno-math-errno %(AdditionalOptions)</AdditionalOptions>
+      <!-- -mcx16: 启用 CX16 指令，Windows 从 8.1 开始要求 CPU 支持它 -->
+      <AdditionalOptions Condition="'$(PlatformToolset)' == 'ClangCL' And '$(Platform)' == 'x64'">/clang:-mcx16 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -104,7 +116,10 @@
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <!-- /Gw: 链接时删除未使用和重复的数据，可以减小二进制文件体积 -->
       <!-- /Zc:checkGwOdr: 防止 /Gw 导致某些 ODR 违规被忽略 -->
-      <AdditionalOptions>/Gw /Zc:checkGwOdr %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/Gw %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions Condition="'$(PlatformToolset)' != 'ClangCL'">/Zc:checkGwOdr %(AdditionalOptions)</AdditionalOptions>
+      <!-- clang-cl 不支持 /LTCG，应使用 LTO -->
+      <AdditionalOptions Condition="'$(PlatformToolset)' == 'ClangCL'">/clang:-flto %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
