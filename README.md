@@ -3,7 +3,7 @@
 ### 编译要求
 
 1. Windows SDK 26100
-2. Visual Studio 2022
+2. Visual Studio 2022/2026
 
 ### 运行要求
 
