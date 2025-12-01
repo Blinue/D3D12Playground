@@ -26,7 +26,11 @@
     <CppWinRTRootNamespaceAutoMerge>true</CppWinRTRootNamespaceAutoMerge>
     <CppWinRTGenerateWindowsMetadata>true</CppWinRTGenerateWindowsMetadata>
     <CppWinRTVerbosity>low</CppWinRTVerbosity>
-    <VCProjectVersion>17.0</VCProjectVersion>
+    <VS17 Condition="$([System.String]::new('$(MSBuildVersion)').StartsWith('17'))">true</VS17>
+    <VS17 Condition="$(VS17) != 'true'">false</VS17>
+    <MinimumVisualStudioVersion>17.0</MinimumVisualStudioVersion>
+    <VCProjectVersion Condition="$(VS17)">17.0</VCProjectVersion>
+    <VCProjectVersion Condition="!$(VS17)">18.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
     <ProjectGuid>{796e8432-73cf-4532-86be-886bc0f10077}</ProjectGuid>
     <RootNamespace>D3D12Playground</RootNamespace>
@@ -41,8 +45,8 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
-    <PlatformToolset Condition="$([System.String]::new('$(MSBuildVersion)').StartsWith('17'))">v143</PlatformToolset>
-    <PlatformToolset Condition="!$([System.String]::new('$(MSBuildVersion)').StartsWith('17'))">v145</PlatformToolset>
+    <PlatformToolset Condition="'$(PlatformToolset)' == '' And $(VS17)">v143</PlatformToolset>
+    <PlatformToolset Condition="'$(PlatformToolset)' == '' And !$(VS17)">v145</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
     <PreferredToolArchitecture Condition="'$(PreferredToolArchitecture)' == ''">x64</PreferredToolArchitecture>
     <UseDebugLibraries Condition="'$(Configuration)' == 'Debug'">true</UseDebugLibraries>
@@ -88,8 +92,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <GenerateDebugInformation Condition="'$(DisablePDB)' == true">false</GenerateDebugInformation>
-      <GenerateDebugInformation Condition="'$(DisablePDB)' != true">true</GenerateDebugInformation>
+      <GenerateDebugInformation Condition="'$(DisablePDB)' == 'true'">false</GenerateDebugInformation>
       <AdditionalDependencies>UxTheme.lib;Dwmapi.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <FxCompile>
