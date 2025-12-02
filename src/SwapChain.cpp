@@ -1,30 +1,24 @@
 #include "pch.h"
 #include "SwapChain.h"
+#include "GraphicsContext.h"
 #include "Win32Helper.h"
 #include <dcomp.h>
 #include <dwmapi.h>
 
 static constexpr uint32_t BUFFER_COUNT_DURING_RESIZE = 2;
 
-SwapChain::~SwapChain() {
-	if (_fence) {
-		_WaitForGpu();
-	}
-}
-
 bool SwapChain::Initialize(
-	ID3D12Device5* device,
-	ID3D12CommandQueue* commandQueue,
-	IDXGIFactory7* dxgiFactory,
+	GraphicsContext& graphicContext,
 	HWND hwndAttach,
 	uint32_t width,
 	uint32_t height,
 	bool useScRGB
 ) noexcept {
-	_device = device;
-	_commandQueue = commandQueue;
+	_graphicContext = &graphicContext;
 
-	const uint32_t bufferCount = GetBufferCount();
+	IDXGIFactory7* dxgiFactory = graphicContext.GetDXGIFactory();
+	ID3D12Device5* device = graphicContext.GetDevice();
+	const uint32_t bufferCount = graphicContext.GetMaxInFlightFrameCount() + 1;
 
 	DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {
 		.Width = width,
@@ -49,7 +43,7 @@ bool SwapChain::Initialize(
 
 	winrt::com_ptr<IDXGISwapChain1> dxgiSwapChain;
 	if (FAILED(dxgiFactory->CreateSwapChainForHwnd(
-		commandQueue,
+		graphicContext.GetCommandQueue(),
 		hwndAttach,
 		&swapChainDesc,
 		nullptr,
@@ -73,8 +67,6 @@ bool SwapChain::Initialize(
 		return false;
 	}
 
-	_curBufferIndex = _dxgiSwapChain->GetCurrentBackBufferIndex();
-
 	dxgiFactory->MakeWindowAssociation(hwndAttach, DXGI_MWA_NO_ALT_ENTER);
 
 	{
@@ -89,40 +81,18 @@ bool SwapChain::Initialize(
 
 	_rtvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
-	if (FAILED(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_fence)))) {
-		return false;
-	}
-
 	_frameBuffers.resize(bufferCount);
-	_frameBufferFenceValues.resize(bufferCount);
 	
 	return SUCCEEDED(_LoadBufferResources(bufferCount, useScRGB));
 }
 
-uint32_t SwapChain::GetBufferCount() const noexcept {
-	return 3;
-}
-
-HRESULT SwapChain::BeginFrame(
-	ID3D12Resource** frameTex,
-	CD3DX12_CPU_DESCRIPTOR_HANDLE& rtvHandle,
-	uint32_t& bufferIndex
-) noexcept {
+void SwapChain::BeginFrame(ID3D12Resource** frameTex, CD3DX12_CPU_DESCRIPTOR_HANDLE& rtvHandle) noexcept {
 	_frameLatencyWaitableObject.wait(1000);
 
-	if (_fence->GetCompletedValue() < _frameBufferFenceValues[_curBufferIndex]) {
-		HRESULT hr = _fence->SetEventOnCompletion(_frameBufferFenceValues[_curBufferIndex], NULL);
-		if (FAILED(hr)) {
-			return hr;
-		}
-	}
-
-	*frameTex = _frameBuffers[_curBufferIndex].get();
+	const uint32_t curBufferIndex = _dxgiSwapChain->GetCurrentBackBufferIndex();
+	*frameTex = _frameBuffers[curBufferIndex].get();
 	rtvHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(
-		_rtvHeap->GetCPUDescriptorHandleForHeapStart(), _curBufferIndex, _rtvDescriptorSize);
-	bufferIndex = _curBufferIndex;
-
-	return S_OK;
+		_rtvHeap->GetCPUDescriptorHandleForHeapStart(), curBufferIndex, _rtvDescriptorSize);
 }
 
 // 和 DwmFlush 效果相同但更准确
@@ -197,7 +167,7 @@ HRESULT SwapChain::EndFrame() noexcept {
 		// 实用价值。
 
 		// 等待渲染完成
-		HRESULT hr = _WaitForGpu();
+		HRESULT hr = _graphicContext->WaitForGPU();
 		if (FAILED(hr)) {
 			return hr;
 		}
@@ -206,30 +176,18 @@ HRESULT SwapChain::EndFrame() noexcept {
 		WaitForDwmComposition();
 	}
 
-	HRESULT hr = _dxgiSwapChain->Present(isRecreated ? 0 : 1, 0);
-	if (FAILED(hr)) {
-		return hr;
-	}
-
-	hr = _commandQueue->Signal(_fence.get(), ++_curFenceValue);
-	if (FAILED(hr)) {
-		return hr;
-	}
-	_frameBufferFenceValues[_curBufferIndex] = _curFenceValue;
-
-	_curBufferIndex = _dxgiSwapChain->GetCurrentBackBufferIndex();
-
-	return S_OK;
+	return _dxgiSwapChain->Present(isRecreated ? 0 : 1, 0);
 }
 
 HRESULT SwapChain::RecreateBuffers(uint32_t width, uint32_t height, bool useScRGB) noexcept {
-	HRESULT hr = _WaitForGpu();
+	HRESULT hr = _graphicContext->WaitForGPU();
 	if (FAILED(hr)) {
 		return hr;
 	}
 
 	// 调整大小期间只用两个后缓冲以提高流畅度并减少边缘闪烁
-	const uint32_t bufferCount = _isResizing ? BUFFER_COUNT_DURING_RESIZE : GetBufferCount();
+	const uint32_t bufferCount = _isResizing ? BUFFER_COUNT_DURING_RESIZE :
+		_graphicContext->GetMaxInFlightFrameCount() + 1;
 
 	std::fill(_frameBuffers.begin(), _frameBuffers.end(), nullptr);
 
@@ -254,8 +212,6 @@ HRESULT SwapChain::RecreateBuffers(uint32_t width, uint32_t height, bool useScRG
 	if (FAILED(hr)) {
 		return hr;
 	}
-
-	_curBufferIndex = _dxgiSwapChain->GetCurrentBackBufferIndex();
 
 	return _LoadBufferResources(bufferCount, useScRGB);
 }
@@ -284,6 +240,7 @@ HRESULT SwapChain::OnResizeEnded() noexcept {
 }
 
 HRESULT SwapChain::_LoadBufferResources(uint32_t bufferCount, bool useScRGB) noexcept {
+	ID3D12Device5* device = _graphicContext->GetDevice();
 	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(_rtvHeap->GetCPUDescriptorHandleForHeapStart());
 	for (uint32_t i = 0; i < bufferCount; ++i) {
 		HRESULT hr = _dxgiSwapChain->GetBuffer(i, IID_PPV_ARGS(&_frameBuffers[i]));
@@ -295,18 +252,9 @@ HRESULT SwapChain::_LoadBufferResources(uint32_t bufferCount, bool useScRGB) noe
 			.Format = useScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
 			.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D
 		};
-		_device->CreateRenderTargetView(_frameBuffers[i].get(), &rtvDesc, rtvHandle);
+		device->CreateRenderTargetView(_frameBuffers[i].get(), &rtvDesc, rtvHandle);
 		rtvHandle.Offset(1, _rtvDescriptorSize);
 	}
 
 	return S_OK;
-}
-
-HRESULT SwapChain::_WaitForGpu() noexcept {
-	HRESULT hr = _commandQueue->Signal(_fence.get(), ++_curFenceValue);
-	if (FAILED(hr)) {
-		return hr;
-	}
-
-	return _fence->SetEventOnCompletion(_curFenceValue, NULL);
 }

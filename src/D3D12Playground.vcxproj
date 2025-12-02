@@ -136,7 +136,7 @@
   <!-- HybridCRT -->
   <Import Project="$(MSBuildThisFileDirectory)\HybridCRT.props" />
   <ItemGroup>
-    <ClCompile Include="DirectXHelper.cpp" />
+    <ClCompile Include="GraphicsContext.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="MainWindow.cpp" />
     <ClCompile Include="pch.cpp">
@@ -148,6 +148,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="DirectXHelper.h" />
+    <ClInclude Include="GraphicsContext.h" />
     <ClInclude Include="MainWindow.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="SwapChain.h" />

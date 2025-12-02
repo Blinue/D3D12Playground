@@ -4,10 +4,10 @@
     <ClCompile Include="main.cpp" />
     <ClCompile Include="MainWindow.cpp" />
     <ClCompile Include="pch.cpp" />
-    <ClCompile Include="DirectXHelper.cpp" />
     <ClCompile Include="Renderer.cpp" />
     <ClCompile Include="SwapChain.cpp" />
     <ClCompile Include="Win32Helper.cpp" />
+    <ClCompile Include="GraphicsContext.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Manifest Include="app.manifest" />
@@ -20,6 +20,7 @@
     <ClInclude Include="Renderer.h" />
     <ClInclude Include="SwapChain.h" />
     <ClInclude Include="Win32Helper.h" />
+    <ClInclude Include="GraphicsContext.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="HybridCRT.props" />

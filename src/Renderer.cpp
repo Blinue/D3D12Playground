@@ -11,9 +11,6 @@
 #endif
 #include <windows.graphics.display.interop.h>
 
-// 自定义 HRESULT 的方法参考自 https://learn.microsoft.com/en-us/windows/win32/com/codes-in-facility-itf
-static constexpr HRESULT S_RECOVERED = MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_ITF, 0x200);
-
 static constexpr float SCENE_REFERRED_SDR_WHITE_LEVEL = 80.0f;
 
 struct Vertex {
@@ -22,7 +19,7 @@ struct Vertex {
 };
 
 Renderer::~Renderer() {
-	_ReleaseD3DResources();
+	_graphicsContext.WaitForGPU();
 }
 
 bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float dpiScale) noexcept {
@@ -62,44 +59,18 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 		return 0;
 	}();
 
-	if (FAILED(_CreateDXGIFactory())) {
+	if (!_graphicsContext.Initialize(1)) {
 		return false;
 	}
 
-	if (!_CreateD3DDevice()) {
-		return false;
-	}
-
-	// 检查根签名版本
-	{
-		D3D12_FEATURE_DATA_ROOT_SIGNATURE featureData = { .HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1 };
-		if (FAILED(_device->CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &featureData, sizeof(featureData)))) {
-			return false;
-		}
-		_rootSignatureVersion = featureData.HighestVersion;
-	}
-
-	{
-		D3D12_COMMAND_QUEUE_DESC queueDesc{
-			.Type = D3D12_COMMAND_LIST_TYPE_DIRECT,
-			.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE
-		};
-		if (FAILED(_device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&_commandQueue)))) {
-			return false;
-		}
-	}
-
-	if (FAILED(_device->CreateCommandList1(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
-		D3D12_COMMAND_LIST_FLAG_NONE, IID_PPV_ARGS(&_commandList)))) {
-		return false;
-	}
+	ID3D12Device5* device = _graphicsContext.GetDevice();
 
 	{
 		const UINT vertexBufferSize = sizeof(Vertex) * 22;
 
 		CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_UPLOAD);
 		CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
-		if (FAILED(_device->CreateCommittedResource(
+		if (FAILED(device->CreateCommittedResource(
 			&heapProperties,
 			D3D12_HEAP_FLAG_NONE,
 			&bufferDesc,
@@ -117,7 +88,7 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 		}
 
 		heapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
-		if (FAILED(_device->CreateCommittedResource(
+		if (FAILED(device->CreateCommittedResource(
 			&heapProperties,
 			D3D12_HEAP_FLAG_NONE,
 			&bufferDesc,
@@ -138,117 +109,112 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 		_InitializeDisplayInformation();
 	}
 
-	if (FAILED(_UpdateAdvancedColor(true))) {
+	if (!_ObtainColorInfo(_colorInfo)) {
 		return false;
 	}
 
-	_swapChain.emplace();
-	if (!_swapChain->Initialize(_device.get(), _commandQueue.get(), _dxgiFactory.get(),
-		hwndMain, width, height, _curAcKind != winrt::AdvancedColorKind::StandardDynamicRange)) {
+	_UpdateWindowTitle();
+
+	if (!_swapChain.Initialize(_graphicsContext, hwndMain, width, height,
+		_colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange)) {
 		return false;
 	}
 
-	_commandAllocators.resize(_swapChain->GetBufferCount());
-	for (winrt::com_ptr<ID3D12CommandAllocator>& commandAllocator : _commandAllocators) {
-		if (FAILED(_device->CreateCommandAllocator(
-			D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator)))) {
-			return false;
-		}
+	if (FAILED(_InitializePSO())) {
+		return false;
 	}
 
 	return true;
 }
 
-bool Renderer::Render(bool onHandlingDeviceLost) noexcept {
+RendererState Renderer::Render() noexcept {
+	if (_state != RendererState::NoError) {
+		return _state;
+	}
+
 	ID3D12Resource* frameTex;
 	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle;
+	_swapChain.BeginFrame(&frameTex, rtvHandle);
+
 	uint32_t frameIndex;
-	HRESULT hr = _CheckDeviceLost(_swapChain->BeginFrame(&frameTex, rtvHandle, frameIndex), onHandlingDeviceLost);
-	if (FAILED(hr) || hr == S_RECOVERED) {
-		return hr == S_RECOVERED;
-	}
-	
-	hr = _CheckDeviceLost(_commandAllocators[frameIndex]->Reset(), onHandlingDeviceLost);
-	if (FAILED(hr) || hr == S_RECOVERED) {
-		return hr == S_RECOVERED;
-	}
-	
-	hr = _CheckDeviceLost(_commandList->Reset(_commandAllocators[frameIndex].get(), _pipelineState.get()), onHandlingDeviceLost);
-	if (FAILED(hr) || hr == S_RECOVERED) {
-		return hr == S_RECOVERED;
+	if (!_CheckResult(_graphicsContext.BeginFrame(frameIndex, _pipelineState.get()))) {
+		return _state;
 	}
 
+	ID3D12GraphicsCommandList* commandList = _graphicsContext.GetCommandList();
+	
 	if (_shouldUpdateSizeDependentResources) {
 		_shouldUpdateSizeDependentResources = false;
-
-		hr = _UpdateSizeDependentResources();
-		if (FAILED(hr) || hr == S_RECOVERED) {
-			return hr == S_RECOVERED;
-		}
+		_UpdateSizeDependentResources(commandList);
 	}
 
-	_commandList->SetGraphicsRootSignature(_rootSignature.get());
+	commandList->SetGraphicsRootSignature(_rootSignature.get());
 
-	if (_curAcKind != winrt::AdvancedColorKind::StandardDynamicRange) {
+	if (_colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange) {
 		// HDR 下提高彩色正方形亮度
-		float boost = _curAcKind == winrt::AdvancedColorKind::WideColorGamut ?
-			1.0f : std::min(_sdrWhiteLevel + 1, _maxLuminance);
-		_commandList->SetGraphicsRoot32BitConstants(0, 1, &boost, 0);
+		float boost = _colorInfo.kind == winrt::AdvancedColorKind::WideColorGamut ?
+			1.0f : std::min(_colorInfo.sdrWhiteLevel + 1, _colorInfo.maxLuminance);
+		commandList->SetGraphicsRoot32BitConstants(0, 1, &boost, 0);
 	}
 
 	{
 		CD3DX12_VIEWPORT viewport(0.0f, 0.0f, (float)_width, (float)_height);
-		_commandList->RSSetViewports(1, &viewport);
+		commandList->RSSetViewports(1, &viewport);
 	}
 	{
 		CD3DX12_RECT scissorRect(0, 0, (LONG)_width, (LONG)_height);
-		_commandList->RSSetScissorRects(1, &scissorRect);
+		commandList->RSSetScissorRects(1, &scissorRect);
 	}
 	
 	{
 		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
 			frameTex, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
-		_commandList->ResourceBarrier(1, &barrier);
+		commandList->ResourceBarrier(1, &barrier);
 	}
 
-	_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+	commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
 	{
 		const float clearColor[] = {
-			0.8f * _sdrWhiteLevel,
-			0.8f * _sdrWhiteLevel,
-			0.6f * _sdrWhiteLevel,
+			0.8f * _colorInfo.sdrWhiteLevel,
+			0.8f * _colorInfo.sdrWhiteLevel,
+			0.6f * _colorInfo.sdrWhiteLevel,
 			1.0f
 		};
-		_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+		commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
 	}
 
-	_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-	_commandList->IASetVertexBuffers(0, 1, &_vertexBufferView);
-	_commandList->DrawInstanced(22, 1, 0, 0);
+	commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+	commandList->IASetVertexBuffers(0, 1, &_vertexBufferView);
+	commandList->DrawInstanced(22, 1, 0, 0);
 	
 	{
 		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
 			frameTex, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
-		_commandList->ResourceBarrier(1, &barrier);
+		commandList->ResourceBarrier(1, &barrier);
 	}
 
-	hr = _CheckDeviceLost(_commandList->Close(), onHandlingDeviceLost);
-	if (FAILED(hr) || hr == S_RECOVERED) {
-		return hr == S_RECOVERED;
+	if (!_CheckResult(commandList->Close())) {
+		return _state;
 	}
 
-	{
-		ID3D12CommandList* t = _commandList.get();
-		_commandQueue->ExecuteCommandLists(1, &t);
+	_graphicsContext.GetCommandQueue()->ExecuteCommandLists(1, CommandListCast(&commandList));
+
+	if (!_CheckResult(_swapChain.EndFrame())) {
+		return _state;
 	}
 
-	return SUCCEEDED(_CheckDeviceLost(_swapChain->EndFrame(), onHandlingDeviceLost));
+	_CheckResult(_graphicsContext.EndFrame());
+	return _state;
 }
 
-bool Renderer::OnSizeChanged(uint32_t width, uint32_t height, float dpiScale) noexcept {
+void Renderer::OnSizeChanged(uint32_t width, uint32_t height, float dpiScale) noexcept {
+	if (_state != RendererState::NoError) {
+		return;
+	}
+
 	if (width == _width && height == _height && dpiScale == _dpiScale) {
-		return true;
+		return;
 	}
 	
 	_width = width;
@@ -257,124 +223,65 @@ bool Renderer::OnSizeChanged(uint32_t width, uint32_t height, float dpiScale) no
 	_shouldUpdateSizeDependentResources = true;
 
 	// 会等待 GPU
-	HRESULT hr = _CheckDeviceLost(_swapChain->RecreateBuffers(
-		width, height, _curAcKind != winrt::AdvancedColorKind::StandardDynamicRange));
-	if (FAILED(hr) || hr == S_RECOVERED) {
-		return hr == S_RECOVERED;
+	if (!_CheckResult(_swapChain.RecreateBuffers(
+		width, height, _colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange))) {
+		return;
 	}
 
-	return Render();
+	Render();
 }
 
 void Renderer::OnResizeStarted() noexcept {
-	_swapChain->OnResizeStarted();
+	if (_state != RendererState::NoError) {
+		return;
+	}
+
+	_swapChain.OnResizeStarted();
 }
 
-bool Renderer::OnResizeEnded() noexcept {
-	return SUCCEEDED(_CheckDeviceLost(_swapChain->OnResizeEnded()));
+void Renderer::OnResizeEnded() noexcept {
+	if (_state != RendererState::NoError) {
+		return;
+	}
+
+	_CheckResult(_swapChain.OnResizeEnded());
 }
 
-bool Renderer::OnWindowPosChanged() noexcept {
-	if (_displayInfo) {
-		return true;
+void Renderer::OnWindowPosChanged() noexcept {
+	// winrt::DisplayInformation 可用时已通过事件监听颜色配置变化
+	if (_state != RendererState::NoError || _displayInfo) {
+		return;
 	}
 
 	HMONITOR hCurMonitor = MonitorFromWindow(_hwndMain, MONITOR_DEFAULTTONEAREST);
 	if (_hCurMonitor == hCurMonitor) {
-		return true;
+		return;
 	}
 	_hCurMonitor = hCurMonitor;
 
-	return SUCCEEDED(_CheckDeviceLost(_UpdateAdvancedColor()));
+	_CheckResult(_UpdateColorInfo());
 }
 
-bool Renderer::OnDisplayChanged() noexcept {
+void Renderer::OnDisplayChanged() noexcept {
+	if (_state != RendererState::NoError) {
+		return;
+	}
+
 	// 如果正在使用 WARP 渲染则检测是否有显卡连接了
-	if (_isUsingWarp && !_dxgiFactory->IsCurrent()) {
-		HRESULT hr = _CreateDXGIFactory();
-		if (FAILED(hr)) {
-			return false;
-		}
-
-		// 查找是否有支持 D3D12 的显卡
-		winrt::com_ptr<IDXGIAdapter1> adapter;
-		for (UINT adapterIdx = 0;
-			SUCCEEDED(_dxgiFactory->EnumAdapters1(adapterIdx, adapter.put()));
-			++adapterIdx
-		) {
-			DXGI_ADAPTER_DESC1 desc;
-			hr = adapter->GetDesc1(&desc);
-			if (FAILED(hr) || DirectXHelper::IsWARP(desc)) {
-				continue;
-			}
-
-			if (SUCCEEDED(D3D12CreateDevice(
-				adapter.get(),
-				D3D_FEATURE_LEVEL_11_0,
-				winrt::guid_of<ID3D12Device>(),
-				nullptr
-			))) {
-				// 改为使用显卡渲染
-				adapter = nullptr;
-				return _HandleDeviceLost();
-			}
-		}
+	if (_graphicsContext.CheckForBetterAdapter()) {
+		// 强制重新创建 D3D 设备
+		_state = RendererState::DeviceLost;
+		return;
 	}
 
-	return _displayInfo || SUCCEEDED(_CheckDeviceLost(_UpdateAdvancedColor()));
-}
-
-HRESULT Renderer::_CreateDXGIFactory() noexcept {
-	UINT dxgiFactoryFlags = 0;
-#ifdef _DEBUG
-	dxgiFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
-#endif
-	return CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&_dxgiFactory));
-}
-
-bool Renderer::_CreateD3DDevice() noexcept {
-	// 枚举查找第一个支持 D3D12 的显卡
-	winrt::com_ptr<IDXGIAdapter1> adapter;
-	for (UINT adapterIdx = 0;
-		SUCCEEDED(_dxgiFactory->EnumAdapters1(adapterIdx, adapter.put()));
-		++adapterIdx
-	) {
-		DXGI_ADAPTER_DESC1 desc;
-		HRESULT hr = adapter->GetDesc1(&desc);
-		if (FAILED(hr) || DirectXHelper::IsWARP(desc)) {
-			continue;
-		}
-
-		if (SUCCEEDED(D3D12CreateDevice(
-			adapter.get(),
-			D3D_FEATURE_LEVEL_11_0,
-			IID_PPV_ARGS(&_device)
-		))) {
-			_isUsingWarp = false;
-			return true;
-		}
+	// winrt::DisplayInformation 可用时已通过事件监听颜色配置变化
+	if (!_displayInfo) {
+		_CheckResult(_UpdateColorInfo());
 	}
-
-	// 作为最后手段，回落到 CPU 渲染 (WARP)
-	// https://docs.microsoft.com/en-us/windows/win32/direct3darticles/directx-warp
-	if (FAILED(_dxgiFactory->EnumWarpAdapter(IID_PPV_ARGS(&adapter)))) {
-		return false;
-	}
-
-	if (SUCCEEDED(D3D12CreateDevice(
-		adapter.get(),
-		D3D_FEATURE_LEVEL_11_0,
-		IID_PPV_ARGS(&_device)
-	))) {
-		_isUsingWarp = true;
-		return true;
-	}
-
-	return false;
 }
 
 // 调用前需等待 GPU 完成
-HRESULT Renderer::_UpdateSizeDependentResources() noexcept {
+void Renderer::_UpdateSizeDependentResources(ID3D12GraphicsCommandList* commandList) noexcept {
 	const float squareWidth = 200.0f * _dpiScale / _width * 2.0f;
 	const float squareHeight = 200.0f * _dpiScale / _height * 2.0f;
 	Vertex triangleVertices[] = {
@@ -416,34 +323,31 @@ HRESULT Renderer::_UpdateSizeDependentResources() noexcept {
 		_isVertexBufferInitialized ? D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER : D3D12_RESOURCE_STATE_COMMON,
 		D3D12_RESOURCE_STATE_COPY_DEST
 	);
-	_commandList->ResourceBarrier(1, &barrier);
+	commandList->ResourceBarrier(1, &barrier);
 
-	_commandList->CopyResource(_vertexBuffer.get(), _vertexUploadBuffer.get());
+	commandList->CopyResource(_vertexBuffer.get(), _vertexUploadBuffer.get());
 
 	barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
 	barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
-	_commandList->ResourceBarrier(1, &barrier);
+	commandList->ResourceBarrier(1, &barrier);
 
 	_isVertexBufferInitialized = true;
-	return S_OK;
 }
 
 bool Renderer::_InitializeDisplayInformation() noexcept {
-	// 不重复初始化
-	if (_dispatcherQueueController) {
-		return true;
-	}
-
-	// DisplayInformation 需要 DispatcherQueue
-	HRESULT hr = CreateDispatcherQueueController(
-		DispatcherQueueOptions{
-			.dwSize = sizeof(DispatcherQueueOptions),
-			.threadType = DQTYPE_THREAD_CURRENT
-		},
-		(PDISPATCHERQUEUECONTROLLER*)winrt::put_abi(_dispatcherQueueController)
-	);
-	if (FAILED(hr)) {
-		return false;
+	static winrt::DispatcherQueueController dispatcherQueueController{ nullptr };
+	if (!dispatcherQueueController) {
+		// DisplayInformation 需要 DispatcherQueue
+		HRESULT hr = CreateDispatcherQueueController(
+			DispatcherQueueOptions{
+				.dwSize = sizeof(DispatcherQueueOptions),
+				.threadType = DQTYPE_THREAD_CURRENT
+			},
+			(PDISPATCHERQUEUECONTROLLER*)winrt::put_abi(dispatcherQueueController)
+		);
+		if (FAILED(hr)) {
+			return false;
+		}
 	}
 
 	winrt::com_ptr<IDisplayInformationStaticsInterop> interop =
@@ -459,11 +363,12 @@ bool Renderer::_InitializeDisplayInformation() noexcept {
 	_acInfoChangedRevoker = _displayInfo.AdvancedColorInfoChanged(
 		winrt::auto_revoke,
 		[this](winrt::DisplayInformation const&, winrt::IInspectable const&) {
-			if (FAILED(_CheckDeviceLost(_UpdateAdvancedColor()))) {
-				PostQuitMessage(1);
+			if (_state == RendererState::NoError) {
+				_CheckResult(_UpdateColorInfo());
 			}
 		}
 	);
+
 	return true;
 }
 
@@ -512,38 +417,31 @@ static float GetSDRWhiteLevel(std::wstring_view monitorName) noexcept {
 	return 1.0f;
 }
 
-HRESULT Renderer::_UpdateAdvancedColorInfo() noexcept {
+bool Renderer::_ObtainColorInfo(ColorInfo& colorInfo) noexcept {
 	if (_displayInfo) {
 		winrt::AdvancedColorInfo acInfo = _displayInfo.GetAdvancedColorInfo();
 
-		_curAcKind = acInfo.CurrentAdvancedColorKind();
-		if (_curAcKind == winrt::AdvancedColorKind::HighDynamicRange) {
-			_maxLuminance = acInfo.MaxLuminanceInNits() / SCENE_REFERRED_SDR_WHITE_LEVEL;
-			_sdrWhiteLevel = acInfo.SdrWhiteLevelInNits() / SCENE_REFERRED_SDR_WHITE_LEVEL;
+		colorInfo.kind = acInfo.CurrentAdvancedColorKind();
+		if (colorInfo.kind == winrt::AdvancedColorKind::HighDynamicRange) {
+			colorInfo.maxLuminance = acInfo.MaxLuminanceInNits() / SCENE_REFERRED_SDR_WHITE_LEVEL;
+			colorInfo.sdrWhiteLevel = acInfo.SdrWhiteLevelInNits() / SCENE_REFERRED_SDR_WHITE_LEVEL;
 		} else {
-			_maxLuminance = 1.0f;
-			_sdrWhiteLevel = 1.0f;
+			colorInfo.maxLuminance = 1.0f;
+			colorInfo.sdrWhiteLevel = 1.0f;
 		}
 		
-		return S_OK;
+		return true;
 	}
 
-	// 未找到视为 SDR
-	_curAcKind = winrt::AdvancedColorKind::StandardDynamicRange;
-	_maxLuminance = 1.0f;
-	_sdrWhiteLevel = 1.0f;
-
-	if (!_dxgiFactory->IsCurrent()) {
-		HRESULT hr = _CreateDXGIFactory();
-		if (FAILED(hr)) {
-			return hr;
-		}
+	IDXGIFactory7* dxgiFactory = _graphicsContext.GetDXGIFactoryForEnumingAdapters();
+	if (!dxgiFactory) {
+		return false;
 	}
 	
 	winrt::com_ptr<IDXGIAdapter1> adapter;
 	winrt::com_ptr<IDXGIOutput> output;
 	for (UINT adapterIdx = 0;
-		SUCCEEDED(_dxgiFactory->EnumAdapters1(adapterIdx, adapter.put()));
+		SUCCEEDED(dxgiFactory->EnumAdapters1(adapterIdx, adapter.put()));
 		++adapterIdx
 	) {
 		for (UINT outputIdx = 0;
@@ -555,182 +453,167 @@ HRESULT Renderer::_UpdateAdvancedColorInfo() noexcept {
 				if (desc.Monitor == _hCurMonitor) {
 					// DXGI 将 WCG 视为 SDR
 					if (desc.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020) {
-						_curAcKind = winrt::AdvancedColorKind::HighDynamicRange;
-						_maxLuminance = desc.MaxLuminance / SCENE_REFERRED_SDR_WHITE_LEVEL;
-						_sdrWhiteLevel = GetSDRWhiteLevel(desc.DeviceName);
+						colorInfo.kind = winrt::AdvancedColorKind::HighDynamicRange;
+						colorInfo.maxLuminance = desc.MaxLuminance / SCENE_REFERRED_SDR_WHITE_LEVEL;
+						colorInfo.sdrWhiteLevel = GetSDRWhiteLevel(desc.DeviceName);
+					} else {
+						colorInfo.kind = winrt::AdvancedColorKind::StandardDynamicRange;
+						colorInfo.maxLuminance = 1.0f;
+						colorInfo.sdrWhiteLevel = 1.0f;
 					}
 					
-					return S_OK;
+					return true;
 				}
 			}
+		}
+	}
+
+	// 未找到视为 SDR
+	colorInfo.kind = winrt::AdvancedColorKind::StandardDynamicRange;
+	colorInfo.maxLuminance = 1.0f;
+	colorInfo.sdrWhiteLevel = 1.0f;
+	return true;
+}
+
+HRESULT Renderer::_UpdateColorInfo() noexcept {
+	ColorInfo oldColorInfo = _colorInfo;
+	if (!_ObtainColorInfo(_colorInfo)) {
+		return E_FAIL;
+	}
+
+	if (oldColorInfo == _colorInfo) {
+		return S_OK;
+	}
+
+	_UpdateWindowTitle();
+
+	// SDR<->其他的转换需要改变交换链格式和着色器
+	const bool shouldUpdateResources =
+		(oldColorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange) !=
+		(_colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange);
+
+	if (shouldUpdateResources) {
+		// 等待 GPU 完成然后改变交换链格式
+		HRESULT hr = _swapChain.RecreateBuffers(_width, _height,
+			_colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange);
+		if (FAILED(hr)) {
+			return hr;
+		}
+
+		hr = _InitializePSO();
+		if (FAILED(hr)) {
+			return hr;
 		}
 	}
 
 	return S_OK;
 }
 
-HRESULT Renderer::_UpdateAdvancedColor(bool onInit) noexcept {
-	winrt::AdvancedColorKind oldAcKind = _curAcKind;
-
-	HRESULT hr = _UpdateAdvancedColorInfo();
-	if (FAILED(hr)) {
-		return hr;
-	}
-
-	if (!onInit && oldAcKind == _curAcKind) {
-		return S_OK;
-	}
-
-	// 更新窗口标题
+void Renderer::_UpdateWindowTitle() const noexcept {
 	const wchar_t* title;
-	if (_curAcKind == winrt::AdvancedColorKind::StandardDynamicRange) {
+	if (_colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange) {
 		title = L"D3D12Playground | SDR";
-	} else if (_curAcKind == winrt::AdvancedColorKind::WideColorGamut) {
+	} else if (_colorInfo.kind == winrt::AdvancedColorKind::WideColorGamut) {
 		title = L"D3D12Playground | WCG";
 	} else {
 		title = L"D3D12Playground | HDR";
 	}
 	SetWindowText(_hwndMain, title);
-
-	// SDR<->其他的转换需要改变交换链格式和着色器
-	const bool shouldUpdateResources =
-		(oldAcKind == winrt::AdvancedColorKind::StandardDynamicRange) != (_curAcKind == winrt::AdvancedColorKind::StandardDynamicRange);
-
-	if (!onInit && shouldUpdateResources) {
-		// 等待 GPU 完成然后改变交换链格式
-		hr = _swapChain->RecreateBuffers(_width, _height,
-			_curAcKind != winrt::AdvancedColorKind::StandardDynamicRange);
-		if (FAILED(hr)) {
-			return hr;
-		}
-	}
-
-	if (onInit || shouldUpdateResources) {
-		// 创建根签名
-		winrt::com_ptr<ID3DBlob> signature;
-		winrt::com_ptr<ID3DBlob> error;
-
-		if (_curAcKind == winrt::AdvancedColorKind::StandardDynamicRange) {
-			CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
-				0, (D3D12_ROOT_PARAMETER1*)nullptr, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
-
-			hr = D3DX12SerializeVersionedRootSignature(
-				&rootSignatureDesc, _rootSignatureVersion, signature.put(), error.put());
-			if (FAILED(hr)) {
-				return hr;
-			}
-		} else {
-			D3D12_ROOT_PARAMETER1 rootParam{
-				.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
-				.Constants = {
-					.Num32BitValues = 1
-				},
-				.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL
-			};
-			CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
-				1, &rootParam, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
-
-			hr = D3DX12SerializeVersionedRootSignature(
-				&rootSignatureDesc, _rootSignatureVersion, signature.put(), error.put());
-			if (FAILED(hr)) {
-				return hr;
-			}
-		}
-		
-		hr = _device->CreateRootSignature(
-			0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&_rootSignature));
-		if (FAILED(hr)) {
-			return hr;
-		}
-
-		// 创建 PSO
-		const D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
-			{ "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-			{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
-		};
-
-		D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {
-			.pRootSignature = _rootSignature.get(),
-			.VS = {.pShaderBytecode = SimpleVS, .BytecodeLength = sizeof(SimpleVS) },
-			.PS = {
-				.pShaderBytecode = _curAcKind == winrt::AdvancedColorKind::StandardDynamicRange ?
-					sRGB_PS : AdvancedColor_PS,
-				.BytecodeLength = _curAcKind == winrt::AdvancedColorKind::StandardDynamicRange ?
-					sizeof(sRGB_PS) : sizeof(AdvancedColor_PS)
-			},
-			.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT),
-			.SampleMask = UINT_MAX,
-			.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT),
-			.InputLayout = {
-				.pInputElementDescs = inputElementDescs,
-				.NumElements = (UINT)std::size(inputElementDescs)
-			},
-			.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
-			.NumRenderTargets = 1,
-			.RTVFormats = { _curAcKind == winrt::AdvancedColorKind::StandardDynamicRange ?
-			DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R16G16B16A16_FLOAT },
-			.SampleDesc = {.Count = 1 }
-		};
-		hr = _device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&_pipelineState));
-		if (FAILED(hr)) {
-			return hr;
-		}
-	}
-
-	return (onInit || Render()) ? S_OK : E_FAIL;
 }
 
-// 设备丢失会立即尝试恢复，所以调用时注意局部变量不要引用 D3D 资源
-HRESULT Renderer::_CheckDeviceLost(HRESULT hr, bool onHandlingDeviceLost) noexcept {
+HRESULT Renderer::_InitializePSO() noexcept {
+	// 创建根签名
+	winrt::com_ptr<ID3DBlob> signature;
+	winrt::com_ptr<ID3DBlob> error;
+	D3D_ROOT_SIGNATURE_VERSION rootSignatureVersion = _graphicsContext.GetRootSignatureVersion();
+
+	if (_colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange) {
+		CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
+			0, (D3D12_ROOT_PARAMETER1*)nullptr, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+		HRESULT hr = D3DX12SerializeVersionedRootSignature(
+			&rootSignatureDesc, rootSignatureVersion, signature.put(), error.put());
+		if (FAILED(hr)) {
+			return hr;
+		}
+	} else {
+		D3D12_ROOT_PARAMETER1 rootParam{
+			.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
+			.Constants = {
+				.Num32BitValues = 1
+			},
+			.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL
+		};
+		CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
+			1, &rootParam, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+		HRESULT hr = D3DX12SerializeVersionedRootSignature(
+			&rootSignatureDesc, rootSignatureVersion, signature.put(), error.put());
+		if (FAILED(hr)) {
+			return hr;
+		}
+	}
+
+	ID3D12Device5* device = _graphicsContext.GetDevice();
+
+	HRESULT hr = device->CreateRootSignature(
+		0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&_rootSignature));
+	if (FAILED(hr)) {
+		return hr;
+	}
+
+	// 创建 PSO
+	const D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
+		{ "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+	};
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {
+		.pRootSignature = _rootSignature.get(),
+		.VS = {.pShaderBytecode = SimpleVS, .BytecodeLength = sizeof(SimpleVS) },
+		.PS = {
+			.pShaderBytecode = _colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange ?
+				sRGB_PS : AdvancedColor_PS,
+			.BytecodeLength = _colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange ?
+				sizeof(sRGB_PS) : sizeof(AdvancedColor_PS)
+		},
+		.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT),
+		.SampleMask = UINT_MAX,
+		.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT),
+		.InputLayout = {
+			.pInputElementDescs = inputElementDescs,
+			.NumElements = (UINT)std::size(inputElementDescs)
+		},
+		.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
+		.NumRenderTargets = 1,
+		.RTVFormats = { _colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange ?
+		DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R16G16B16A16_FLOAT },
+		.SampleDesc = {.Count = 1 }
+	};
+	return device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&_pipelineState));
+}
+
+bool Renderer::_CheckResult(bool success) noexcept {
+	assert(_state == RendererState::NoError);
+
+	if (!success) {
+		_state = RendererState::Error;
+	}
+	return success;
+}
+
+bool Renderer::_CheckResult(HRESULT hr) noexcept {
+	assert(_state == RendererState::NoError);
+
 	if (SUCCEEDED(hr)) {
-		return hr;
+		return true;
 	}
-
-	// 处理设备丢失时再次发生设备丢失则不再尝试恢复
-	if ((hr != DXGI_ERROR_DEVICE_REMOVED && hr != DXGI_ERROR_DEVICE_RESET) || onHandlingDeviceLost) {
-		return hr;
-	}
-
-	// 设备丢失，需要重新初始化
-	return _HandleDeviceLost() ? S_RECOVERED : hr;
-}
-
-bool Renderer::_HandleDeviceLost() noexcept {
-	_ReleaseD3DResources();
 	
-	if (!Initialize(_hwndMain, _width, _height, _dpiScale)) {
-		return false;
+	if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
+		_state = RendererState::DeviceLost;
+	} else {
+		_state = RendererState::Error;
 	}
 
-	return Render(true);
-}
-
-void Renderer::_ReleaseD3DResources() noexcept {
-	// 首先等待 GPU
-	_swapChain.reset();
-
-	_vertexUploadBuffer = nullptr;
-	_vertexBuffer = nullptr;
-	_pipelineState = nullptr;
-	_rootSignature = nullptr;
-	_commandList = nullptr;
-	_commandAllocators.clear();
-	_commandQueue = nullptr;
-	_device = nullptr;
-	_dxgiFactory = nullptr;
-
-	_shouldUpdateSizeDependentResources = true;
-	_isVertexBufferInitialized = false;
-	
-#ifdef _DEBUG
-	// 检查是否所有 D3D 资源都已释放。和 ID3D12DebugDevice::ReportLiveDeviceObjects 相比，
-	// IDXGIDebug::ReportLiveObjects 检查的范围更大，而且可以在所有资源释放后调用。
-	winrt::com_ptr<IDXGIDebug1> dxgiDebug;
-	if (SUCCEEDED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&dxgiDebug)))) {
-		dxgiDebug->ReportLiveObjects(
-			DXGI_DEBUG_ALL,
-			DXGI_DEBUG_RLO_FLAGS(DXGI_DEBUG_RLO_DETAIL | DXGI_DEBUG_RLO_IGNORE_INTERNAL)
-		);
-	}
-#endif
+	return false;
 }

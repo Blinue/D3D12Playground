@@ -15,6 +15,8 @@ protected:
 	LRESULT _MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) noexcept;
 
 private:
+	bool _Render() noexcept;
+
 	std::optional<Renderer> _renderer;
 	float _dpiScale = 1.0f;
 	// 用于区分调整大小和移动

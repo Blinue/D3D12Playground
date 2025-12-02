@@ -1,30 +1,22 @@
 #pragma once
 
+class GraphicsContext;
+
 class SwapChain {
 public:
 	SwapChain() = default;
 	SwapChain(const SwapChain&) = delete;
 	SwapChain(SwapChain&&) = default;
 
-	~SwapChain();
-
 	bool Initialize(
-		ID3D12Device5* device,
-		ID3D12CommandQueue* commandQueue,
-		IDXGIFactory7* dxgiFactory,
+		GraphicsContext& graphicContext,
 		HWND hwndAttach,
 		uint32_t width,
 		uint32_t height,
 		bool useScRGB
 	) noexcept;
 
-	uint32_t GetBufferCount() const noexcept;
-
-	HRESULT BeginFrame(
-		ID3D12Resource** frameTex,
-		CD3DX12_CPU_DESCRIPTOR_HANDLE& rtvHandle,
-		uint32_t& bufferIndex
-	) noexcept;
+	void BeginFrame(ID3D12Resource** frameTex, CD3DX12_CPU_DESCRIPTOR_HANDLE& rtvHandle) noexcept;
 
 	HRESULT EndFrame() noexcept;
 
@@ -37,22 +29,14 @@ public:
 private:
 	HRESULT _LoadBufferResources(uint32_t bufferCount, bool useScRGB) noexcept;
 
-	HRESULT _WaitForGpu() noexcept;
-
-	ID3D12Device* _device = nullptr;
-	ID3D12CommandQueue* _commandQueue = nullptr;
+	GraphicsContext* _graphicContext = nullptr;
 
 	winrt::com_ptr<IDXGISwapChain4> _dxgiSwapChain;
 	wil::unique_event_nothrow _frameLatencyWaitableObject;
 	std::vector<winrt::com_ptr<ID3D12Resource>> _frameBuffers;
-	std::vector<uint64_t> _frameBufferFenceValues;
-	uint32_t _curBufferIndex = 0;
-
+	
 	winrt::com_ptr<ID3D12DescriptorHeap> _rtvHeap;
 	uint32_t _rtvDescriptorSize = 0;
-
-	winrt::com_ptr<ID3D12Fence1> _fence;
-	uint64_t _curFenceValue = 0;
 	
 	bool _isRecreated = true;
 	bool _isResizing = false;

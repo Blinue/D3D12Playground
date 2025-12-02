@@ -1,8 +1,6 @@
 #include "pch.h"
 #include "MainWindow.h"
 #include <Uxtheme.h>
-// #include <dispatcherqueue.h>
-// #include <windows.graphics.display.interop.h>
 
 bool MainWindow::Create() noexcept {
 	static const wchar_t* MAIN_WINDOW_CLASS_NAME = L"D3D12Playground_Main";
@@ -55,7 +53,7 @@ bool MainWindow::Create() noexcept {
 		return false;
 	}
 
-	if (!_renderer->Render()) {
+	if (!_Render()) {
 		return false;
 	}
 
@@ -76,7 +74,7 @@ int MainWindow::MessageLoop() noexcept {
 			DispatchMessage(&msg);
 		}
 
-		if (!_renderer->Render()) {
+		if (!_Render()) {
 			PostQuitMessage(1);
 		}
 	}
@@ -140,17 +138,15 @@ LRESULT MainWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) noex
 			NCCALCSIZE_PARAMS& params = *(NCCALCSIZE_PARAMS*)lParam;
 			// 此时第一个成员是新窗口矩形
 			const RECT& clientRect = params.rgrc[0];
-			if (!_renderer->OnSizeChanged(clientRect.right - clientRect.left, clientRect.bottom - clientRect.top, _dpiScale)) {
-				PostQuitMessage(1);
-			}
+			_renderer->OnSizeChanged(clientRect.right - clientRect.left, clientRect.bottom - clientRect.top, _dpiScale);
 		}
 
 		return 0;
 	}
 	case WM_WINDOWPOSCHANGED:
 	{
-		if (_renderer && !_renderer->OnWindowPosChanged()) {
-			PostQuitMessage(1);
+		if (_renderer) {
+			_renderer->OnWindowPosChanged();
 		}
 		return 0;
 	}
@@ -164,7 +160,10 @@ LRESULT MainWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) noex
 	{
 		if (_isPreparingForResize) {
 			_isResizing = true;
-			_renderer->OnResizeStarted();
+
+			if (_renderer) {
+				_renderer->OnResizeStarted();
+			}
 		}
 		return 0;
 	}
@@ -172,14 +171,17 @@ LRESULT MainWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) noex
 	{
 		if (_isResizing) {
 			_isResizing = false;
-			_renderer->OnResizeEnded();
+
+			if (_renderer) {
+				_renderer->OnResizeEnded();
+			}
 		}
 		return 0;
 	}
 	case WM_DISPLAYCHANGE:
 	{
-		if (_renderer && !_renderer->OnDisplayChanged()) {
-			PostQuitMessage(1);
+		if (_renderer) {
+			_renderer->OnDisplayChanged();
 		}
 		return 0;
 	}
@@ -191,4 +193,26 @@ LRESULT MainWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) noex
 	}
 
 	return base_type::_MessageHandler(msg, wParam, lParam);
+}
+
+bool MainWindow::_Render() noexcept {
+	RendererState state = _renderer->Render();
+
+	if (state == RendererState::NoError) {
+		return true;
+	} else if (state == RendererState::DeviceLost) {
+		// 设备丢失重新创建 Renderer
+		_renderer.emplace();
+
+		RECT clientRect;
+		GetClientRect(Handle(), &clientRect);
+		if (!_renderer->Initialize(Handle(), clientRect.right - clientRect.left, clientRect.bottom - clientRect.top, _dpiScale)) {
+			return false;
+		}
+
+		// 如果设备再次丢失不再尝试恢复
+		return _renderer->Render() == RendererState::NoError;
+	} else {
+		return false;
+	}
 }
