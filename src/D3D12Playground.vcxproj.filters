@@ -21,6 +21,7 @@
     <ClInclude Include="SwapChain.h" />
     <ClInclude Include="Win32Helper.h" />
     <ClInclude Include="GraphicsContext.h" />
+    <ClInclude Include="ColorInfo.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="HybridCRT.props" />

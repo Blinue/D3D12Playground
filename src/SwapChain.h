@@ -1,4 +1,5 @@
 #pragma once
+#include "ColorInfo.h"
 
 class GraphicsContext;
 
@@ -13,21 +14,25 @@ public:
 		HWND hwndAttach,
 		uint32_t width,
 		uint32_t height,
-		bool useScRGB
+		const ColorInfo& colorInfo
 	) noexcept;
 
 	void BeginFrame(ID3D12Resource** frameTex, CD3DX12_CPU_DESCRIPTOR_HANDLE& rtvHandle) noexcept;
 
 	HRESULT EndFrame() noexcept;
 
-	HRESULT RecreateBuffers(uint32_t width, uint32_t height, bool useScRGB) noexcept;
-
 	void OnResizeStarted() noexcept;
+
+	HRESULT OnSizeChanged(uint32_t width, uint32_t height) noexcept;
 
 	HRESULT OnResizeEnded() noexcept;
 
+	HRESULT OnColorInfoChanged(const ColorInfo& colorInfo) noexcept;
+
 private:
-	HRESULT _LoadBufferResources(uint32_t bufferCount, bool useScRGB) noexcept;
+	HRESULT _RecreateBuffers() noexcept;
+
+	HRESULT _LoadBufferResources() noexcept;
 
 	GraphicsContext* _graphicContext = nullptr;
 
@@ -37,6 +42,11 @@ private:
 	
 	winrt::com_ptr<ID3D12DescriptorHeap> _rtvHeap;
 	uint32_t _rtvDescriptorSize = 0;
+
+	uint32_t _width = 0;
+	uint32_t _height = 0;
+	uint32_t _bufferCount = 0;
+	bool _isScRGB = false;
 	
 	bool _isRecreated = true;
 	bool _isResizing = false;

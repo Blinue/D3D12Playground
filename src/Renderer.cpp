@@ -115,8 +115,7 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 
 	_UpdateWindowTitle();
 
-	if (!_swapChain.Initialize(_graphicsContext, hwndMain, width, height,
-		_colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange)) {
+	if (!_swapChain.Initialize(_graphicsContext, hwndMain, width, height, _colorInfo)) {
 		return false;
 	}
 
@@ -132,6 +131,8 @@ RendererState Renderer::Render() noexcept {
 		return _state;
 	}
 
+	// SwapChain::BeginFrame 和 GraphicsContext::BeginFrame 无顺序要求，不过
+	// 前者通常等待时间更久，将它放在前面可以减少等待次数。
 	ID3D12Resource* frameTex;
 	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle;
 	_swapChain.BeginFrame(&frameTex, rtvHandle);
@@ -204,6 +205,7 @@ RendererState Renderer::Render() noexcept {
 		return _state;
 	}
 
+	// GraphicsContext::EndFrame 必须在 SwapChain::EndFrame 之后
 	_CheckResult(_graphicsContext.EndFrame());
 	return _state;
 }
@@ -223,8 +225,7 @@ void Renderer::OnSizeChanged(uint32_t width, uint32_t height, float dpiScale) no
 	_shouldUpdateSizeDependentResources = true;
 
 	// 会等待 GPU
-	if (!_CheckResult(_swapChain.RecreateBuffers(
-		width, height, _colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange))) {
+	if (!_CheckResult(_swapChain.OnSizeChanged(width, height))) {
 		return;
 	}
 
@@ -494,8 +495,7 @@ HRESULT Renderer::_UpdateColorInfo() noexcept {
 
 	if (shouldUpdateResources) {
 		// 等待 GPU 完成然后改变交换链格式
-		HRESULT hr = _swapChain.RecreateBuffers(_width, _height,
-			_colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange);
+		HRESULT hr = _swapChain.OnColorInfoChanged(_colorInfo);
 		if (FAILED(hr)) {
 			return hr;
 		}

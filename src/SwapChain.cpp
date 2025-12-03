@@ -5,30 +5,33 @@
 #include <dcomp.h>
 #include <dwmapi.h>
 
-static constexpr uint32_t BUFFER_COUNT_DURING_RESIZE = 2;
-
 bool SwapChain::Initialize(
 	GraphicsContext& graphicContext,
 	HWND hwndAttach,
 	uint32_t width,
 	uint32_t height,
-	bool useScRGB
+	const ColorInfo& colorInfo
 ) noexcept {
 	_graphicContext = &graphicContext;
+	_width = width;
+	_height = height;
+	_isScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
 
 	IDXGIFactory7* dxgiFactory = graphicContext.GetDXGIFactory();
 	ID3D12Device5* device = graphicContext.GetDevice();
-	const uint32_t bufferCount = graphicContext.GetMaxInFlightFrameCount() + 1;
+
+	_bufferCount = graphicContext.GetMaxInFlightFrameCount() + 1;
 
 	DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {
 		.Width = width,
 		.Height = height,
-		.Format = useScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM,
+		// 默认色域正是我们想要的，无需额外设置
+		.Format = _isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM,
 		.SampleDesc = {
 			.Count = 1
 		},
 		.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT,
-		.BufferCount = bufferCount,
+		.BufferCount = _bufferCount,
 #ifdef _DEBUG
 		// 使边缘闪烁更容易观察到
 		.Scaling = DXGI_SCALING_NONE,
@@ -58,7 +61,7 @@ bool SwapChain::Initialize(
 		return false;
 	}
 
-	if (FAILED(_dxgiSwapChain->SetMaximumFrameLatency(bufferCount - 1))) {
+	if (FAILED(_dxgiSwapChain->SetMaximumFrameLatency(_bufferCount - 1))) {
 		return false;
 	}
 
@@ -72,7 +75,7 @@ bool SwapChain::Initialize(
 	{
 		D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {
 			.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
-			.NumDescriptors = bufferCount
+			.NumDescriptors = _bufferCount
 		};
 		if (FAILED(device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&_rtvHeap)))) {
 			return false;
@@ -81,9 +84,9 @@ bool SwapChain::Initialize(
 
 	_rtvDescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
-	_frameBuffers.resize(bufferCount);
+	_frameBuffers.resize(_bufferCount);
 	
-	return SUCCEEDED(_LoadBufferResources(bufferCount, useScRGB));
+	return SUCCEEDED(_LoadBufferResources());
 }
 
 void SwapChain::BeginFrame(ID3D12Resource** frameTex, CD3DX12_CPU_DESCRIPTOR_HANDLE& rtvHandle) noexcept {
@@ -179,23 +182,64 @@ HRESULT SwapChain::EndFrame() noexcept {
 	return _dxgiSwapChain->Present(isRecreated ? 0 : 1, 0);
 }
 
-HRESULT SwapChain::RecreateBuffers(uint32_t width, uint32_t height, bool useScRGB) noexcept {
+void SwapChain::OnResizeStarted() noexcept {
+	// 尺寸变化时再重建交换链
+	_isResizing = true;
+}
+
+HRESULT SwapChain::OnSizeChanged(uint32_t width, uint32_t height) noexcept {
+	_width = width;
+	_height = height;
+	// 调整大小期间只用两个后备缓冲以提高流畅度并减少边缘闪烁
+	_bufferCount = _isResizing ? 2 : _graphicContext->GetMaxInFlightFrameCount() + 1;
+
+	return _RecreateBuffers();
+}
+
+HRESULT SwapChain::OnResizeEnded() noexcept {
+	_isResizing = false;
+
+	// 恢复后备缓冲数量
+	const uint32_t oldBufferCount = _bufferCount;
+	_bufferCount = _graphicContext->GetMaxInFlightFrameCount() + 1;
+
+	if (_bufferCount == oldBufferCount) {
+		return S_OK;
+	}
+
+	return _RecreateBuffers();
+}
+
+HRESULT SwapChain::OnColorInfoChanged(const ColorInfo& colorInfo) noexcept {
+	const bool wasScRGB = _isScRGB;
+	_isScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
+
+	if (_isScRGB == wasScRGB) {
+		return S_OK;
+	}
+
+	HRESULT hr = _RecreateBuffers();
+	if (FAILED(hr)) {
+		return hr;
+	}
+
+	return _dxgiSwapChain->SetColorSpace1(
+		_isScRGB ? DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709 : DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709);
+}
+
+HRESULT SwapChain::_RecreateBuffers() noexcept {
 	HRESULT hr = _graphicContext->WaitForGPU();
 	if (FAILED(hr)) {
 		return hr;
 	}
 
-	// 调整大小期间只用两个后备缓冲以提高流畅度并减少边缘闪烁。不要更改最大帧延迟，一来
-	// 调整大小期间不会有帧排队，二来交换链不大支持中途改变最大帧延迟，需要额外等待
-	// FrameLatencyWaitableObject 来修正内部状态。
-	const uint32_t bufferCount = _isResizing ? BUFFER_COUNT_DURING_RESIZE :
-		_graphicContext->GetMaxInFlightFrameCount() + 1;
-
 	std::fill(_frameBuffers.begin(), _frameBuffers.end(), nullptr);
 
+	// 不要更改最大帧延迟，一来调整大小期间不会有帧排队，二来交换链不大支持中途改变
+	// 最大帧延迟，需要额外等待 FrameLatencyWaitableObject 来修正内部状态。
 	hr = _dxgiSwapChain->ResizeBuffers(
-		bufferCount, width, height,
-		useScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM,
+		_bufferCount, _width, _height,
+		_isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM,
 		DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT
 	);
 	if (FAILED(hr)) {
@@ -204,49 +248,20 @@ HRESULT SwapChain::RecreateBuffers(uint32_t width, uint32_t height, bool useScRG
 
 	_isRecreated = true;
 
-	hr = _dxgiSwapChain->SetColorSpace1(
-		useScRGB ? DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709 : DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709);
-	if (FAILED(hr)) {
-		return hr;
-	}
-
-	return _LoadBufferResources(bufferCount, useScRGB);
+	return _LoadBufferResources();
 }
 
-void SwapChain::OnResizeStarted() noexcept {
-	// 尺寸变化时再重建交换链
-	_isResizing = true;
-}
-
-HRESULT SwapChain::OnResizeEnded() noexcept {
-	_isResizing = false;
-
-	// 调整大小结束后立刻重建交换链
-	DXGI_SWAP_CHAIN_DESC1 desc;
-	HRESULT hr = _dxgiSwapChain->GetDesc1(&desc);
-	if (FAILED(hr)) {
-		return hr;
-	}
-
-	// 后备缓冲数量不变则无需重建交换链
-	if (desc.BufferCount != BUFFER_COUNT_DURING_RESIZE) {
-		return S_OK;
-	} else {
-		return RecreateBuffers(desc.Width, desc.Height, desc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT);
-	}
-}
-
-HRESULT SwapChain::_LoadBufferResources(uint32_t bufferCount, bool useScRGB) noexcept {
+HRESULT SwapChain::_LoadBufferResources() noexcept {
 	ID3D12Device5* device = _graphicContext->GetDevice();
 	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(_rtvHeap->GetCPUDescriptorHandleForHeapStart());
-	for (uint32_t i = 0; i < bufferCount; ++i) {
+	for (uint32_t i = 0; i < _bufferCount; ++i) {
 		HRESULT hr = _dxgiSwapChain->GetBuffer(i, IID_PPV_ARGS(&_frameBuffers[i]));
 		if (FAILED(hr)) {
 			return hr;
 		}
 
 		D3D12_RENDER_TARGET_VIEW_DESC rtvDesc = {
-			.Format = useScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
+			.Format = _isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
 			.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D
 		};
 		device->CreateRenderTargetView(_frameBuffers[i].get(), &rtvDesc, rtvHandle);
