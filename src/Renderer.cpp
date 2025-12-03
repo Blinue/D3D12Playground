@@ -59,7 +59,7 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 		return 0;
 	}();
 
-	if (!_graphicsContext.Initialize(1)) {
+	if (!_graphicsContext.Initialize(2)) {
 		return false;
 	}
 

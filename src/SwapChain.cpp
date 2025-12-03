@@ -228,7 +228,7 @@ HRESULT SwapChain::OnResizeEnded() noexcept {
 		return hr;
 	}
 
-	// 后缓冲数量不变则从未调整过尺寸，无需重建交换链
+	// 后备缓冲数量不变则无需重建交换链
 	if (desc.BufferCount != BUFFER_COUNT_DURING_RESIZE) {
 		return S_OK;
 	} else {
