@@ -185,7 +185,9 @@ HRESULT SwapChain::RecreateBuffers(uint32_t width, uint32_t height, bool useScRG
 		return hr;
 	}
 
-	// 调整大小期间只用两个后缓冲以提高流畅度并减少边缘闪烁
+	// 调整大小期间只用两个后备缓冲以提高流畅度并减少边缘闪烁。不要更改最大帧延迟，一来
+	// 调整大小期间不会有帧排队，二来交换链不大支持中途改变最大帧延迟，需要额外等待
+	// FrameLatencyWaitableObject 来修正内部状态。
 	const uint32_t bufferCount = _isResizing ? BUFFER_COUNT_DURING_RESIZE :
 		_graphicContext->GetMaxInFlightFrameCount() + 1;
 
@@ -201,11 +203,6 @@ HRESULT SwapChain::RecreateBuffers(uint32_t width, uint32_t height, bool useScRG
 	}
 
 	_isRecreated = true;
-
-	hr = _dxgiSwapChain->SetMaximumFrameLatency(bufferCount - 1);
-	if (FAILED(hr)) {
-		return hr;
-	}
 
 	hr = _dxgiSwapChain->SetColorSpace1(
 		useScRGB ? DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709 : DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709);
