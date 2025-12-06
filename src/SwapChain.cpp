@@ -20,6 +20,18 @@ bool SwapChain::Initialize(
 	IDXGIFactory7* dxgiFactory = graphicContext.GetDXGIFactory();
 	ID3D12Device5* device = graphicContext.GetDevice();
 
+	// 检查撕裂支持
+	{
+		BOOL supportTearing = FALSE;
+		HRESULT hr = dxgiFactory->CheckFeatureSupport(
+			DXGI_FEATURE_PRESENT_ALLOW_TEARING, &supportTearing, sizeof(supportTearing));
+		if (FAILED(hr)) {
+			return false;
+		}
+
+		_isTearingSupported = supportTearing;
+	}
+
 	_bufferCount = graphicContext.GetMaxInFlightFrameCount() + 1;
 
 	DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {
@@ -41,7 +53,9 @@ bool SwapChain::Initialize(
 #endif
 		.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD,
 		.AlphaMode = DXGI_ALPHA_MODE_IGNORE,
-		.Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT
+		// 支持时始终启用 DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING
+		.Flags = UINT((_isTearingSupported ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0)
+		| DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT)
 	};
 
 	winrt::com_ptr<IDXGISwapChain1> dxgiSwapChain;
@@ -182,11 +196,6 @@ HRESULT SwapChain::EndFrame() noexcept {
 	return _dxgiSwapChain->Present(isRecreated ? 0 : 1, 0);
 }
 
-void SwapChain::OnResizeStarted() noexcept {
-	// 尺寸变化时再重建交换链
-	_isResizing = true;
-}
-
 HRESULT SwapChain::OnSizeChanged(uint32_t width, uint32_t height) noexcept {
 	_width = width;
 	_height = height;
@@ -194,6 +203,11 @@ HRESULT SwapChain::OnSizeChanged(uint32_t width, uint32_t height) noexcept {
 	_bufferCount = _isResizing ? 2 : _graphicContext->GetMaxInFlightFrameCount() + 1;
 
 	return _RecreateBuffers();
+}
+
+void SwapChain::OnResizeStarted() noexcept {
+	// 尺寸变化时再重建交换链
+	_isResizing = true;
 }
 
 HRESULT SwapChain::OnResizeEnded() noexcept {
@@ -240,7 +254,8 @@ HRESULT SwapChain::_RecreateBuffers() noexcept {
 	hr = _dxgiSwapChain->ResizeBuffers(
 		_bufferCount, _width, _height,
 		_isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM,
-		DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT
+		UINT((_isTearingSupported ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0)
+			| DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT)
 	);
 	if (FAILED(hr)) {
 		return hr;

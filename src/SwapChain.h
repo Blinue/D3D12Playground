@@ -21,9 +21,9 @@ public:
 
 	HRESULT EndFrame() noexcept;
 
-	void OnResizeStarted() noexcept;
-
 	HRESULT OnSizeChanged(uint32_t width, uint32_t height) noexcept;
+
+	void OnResizeStarted() noexcept;
 
 	HRESULT OnResizeEnded() noexcept;
 
@@ -48,6 +48,7 @@ private:
 	uint32_t _bufferCount = 0;
 	bool _isScRGB = false;
 	
+	bool _isTearingSupported = false;
 	bool _isRecreated = true;
 	bool _isResizing = false;
 };
