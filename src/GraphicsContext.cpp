@@ -76,7 +76,7 @@ HRESULT GraphicsContext::WaitForFenceValue(uint64_t fenceValue) noexcept {
 	}
 }
 
-HRESULT GraphicsContext::WaitForGPU() noexcept {
+HRESULT GraphicsContext::WaitForGpu() noexcept {
 	HRESULT hr = _commandQueue->Signal(_fence.get(), ++_curFenceValue);
 	if (FAILED(hr)) {
 		return hr;
@@ -85,10 +85,7 @@ HRESULT GraphicsContext::WaitForGPU() noexcept {
 	return WaitForFenceValue(_curFenceValue);
 }
 
-HRESULT GraphicsContext::BeginFrame(
-	uint32_t& curFrameIndex,
-	ID3D12PipelineState* initialState
-) noexcept {
+HRESULT GraphicsContext::BeginFrame(uint32_t& curFrameIndex, ID3D12PipelineState* initialState) noexcept {
 	HRESULT hr = WaitForFenceValue(_frameFenceValues[_curFrameIndex]);
 	if (FAILED(hr)) {
 		return hr;

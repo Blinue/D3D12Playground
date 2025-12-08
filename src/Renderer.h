@@ -21,11 +21,11 @@ public:
 
 	RendererState Render() noexcept;
 
-	void OnSizeChanged(uint32_t width, uint32_t height, float dpiScale) noexcept;
-
 	void OnResizeStarted() noexcept;
 
 	void OnResizeEnded() noexcept;
+
+	void OnResized(uint32_t width, uint32_t height, float dpiScale) noexcept;
 
 	void OnWindowPosChanged() noexcept;
 
@@ -36,9 +36,9 @@ private:
 
 	bool _InitializeDisplayInformation() noexcept;
 
-	bool _ObtainColorInfo(ColorInfo& colorInfo) noexcept;
+	bool _UpdateColorInfo() noexcept;
 
-	HRESULT _UpdateColorInfo() noexcept;
+	HRESULT _UpdateColorSpace() noexcept;
 
 	void _UpdateWindowTitle() const noexcept;
 

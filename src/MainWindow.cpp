@@ -138,7 +138,7 @@ LRESULT MainWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) noex
 			NCCALCSIZE_PARAMS& params = *(NCCALCSIZE_PARAMS*)lParam;
 			// 此时第一个成员是新窗口矩形
 			const RECT& clientRect = params.rgrc[0];
-			_renderer->OnSizeChanged(clientRect.right - clientRect.left, clientRect.bottom - clientRect.top, _dpiScale);
+			_renderer->OnResized(clientRect.right - clientRect.left, clientRect.bottom - clientRect.top, _dpiScale);
 		}
 
 		return 0;

@@ -19,7 +19,7 @@ struct Vertex {
 };
 
 Renderer::~Renderer() {
-	_graphicsContext.WaitForGPU();
+	_graphicsContext.WaitForGpu();
 }
 
 bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float dpiScale) noexcept {
@@ -109,7 +109,7 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 		_InitializeDisplayInformation();
 	}
 
-	if (!_ObtainColorInfo(_colorInfo)) {
+	if (!_UpdateColorInfo()) {
 		return false;
 	}
 
@@ -210,28 +210,6 @@ RendererState Renderer::Render() noexcept {
 	return _state;
 }
 
-void Renderer::OnSizeChanged(uint32_t width, uint32_t height, float dpiScale) noexcept {
-	if (_state != RendererState::NoError) {
-		return;
-	}
-
-	if (width == _width && height == _height && dpiScale == _dpiScale) {
-		return;
-	}
-	
-	_width = width;
-	_height = height;
-	_dpiScale = dpiScale;
-	_shouldUpdateSizeDependentResources = true;
-
-	// 会等待 GPU
-	if (!_CheckResult(_swapChain.OnSizeChanged(width, height))) {
-		return;
-	}
-
-	Render();
-}
-
 void Renderer::OnResizeStarted() noexcept {
 	if (_state != RendererState::NoError) {
 		return;
@@ -248,6 +226,28 @@ void Renderer::OnResizeEnded() noexcept {
 	_CheckResult(_swapChain.OnResizeEnded());
 }
 
+void Renderer::OnResized(uint32_t width, uint32_t height, float dpiScale) noexcept {
+	if (_state != RendererState::NoError) {
+		return;
+	}
+
+	if (width == _width && height == _height && dpiScale == _dpiScale) {
+		return;
+	}
+
+	_width = width;
+	_height = height;
+	_dpiScale = dpiScale;
+	_shouldUpdateSizeDependentResources = true;
+
+	// 会等待 GPU
+	if (!_CheckResult(_swapChain.OnResized(width, height))) {
+		return;
+	}
+
+	Render();
+}
+
 void Renderer::OnWindowPosChanged() noexcept {
 	// winrt::DisplayInformation 可用时已通过事件监听颜色配置变化
 	if (_state != RendererState::NoError || _displayInfo) {
@@ -260,7 +260,7 @@ void Renderer::OnWindowPosChanged() noexcept {
 	}
 	_hCurMonitor = hCurMonitor;
 
-	_CheckResult(_UpdateColorInfo());
+	_CheckResult(_UpdateColorSpace());
 }
 
 void Renderer::OnDisplayChanged() noexcept {
@@ -277,7 +277,7 @@ void Renderer::OnDisplayChanged() noexcept {
 
 	// winrt::DisplayInformation 可用时已通过事件监听颜色配置变化
 	if (!_displayInfo) {
-		_CheckResult(_UpdateColorInfo());
+		_CheckResult(_UpdateColorSpace());
 	}
 }
 
@@ -365,7 +365,7 @@ bool Renderer::_InitializeDisplayInformation() noexcept {
 		winrt::auto_revoke,
 		[this](winrt::DisplayInformation const&, winrt::IInspectable const&) {
 			if (_state == RendererState::NoError) {
-				_CheckResult(_UpdateColorInfo());
+				_CheckResult(_UpdateColorSpace());
 			}
 		}
 	);
@@ -418,17 +418,17 @@ static float GetSDRWhiteLevel(std::wstring_view monitorName) noexcept {
 	return 1.0f;
 }
 
-bool Renderer::_ObtainColorInfo(ColorInfo& colorInfo) noexcept {
+bool Renderer::_UpdateColorInfo() noexcept {
 	if (_displayInfo) {
 		winrt::AdvancedColorInfo acInfo = _displayInfo.GetAdvancedColorInfo();
 
-		colorInfo.kind = acInfo.CurrentAdvancedColorKind();
-		if (colorInfo.kind == winrt::AdvancedColorKind::HighDynamicRange) {
-			colorInfo.maxLuminance = acInfo.MaxLuminanceInNits() / SCENE_REFERRED_SDR_WHITE_LEVEL;
-			colorInfo.sdrWhiteLevel = acInfo.SdrWhiteLevelInNits() / SCENE_REFERRED_SDR_WHITE_LEVEL;
+		_colorInfo.kind = acInfo.CurrentAdvancedColorKind();
+		if (_colorInfo.kind == winrt::AdvancedColorKind::HighDynamicRange) {
+			_colorInfo.maxLuminance = acInfo.MaxLuminanceInNits() / SCENE_REFERRED_SDR_WHITE_LEVEL;
+			_colorInfo.sdrWhiteLevel = acInfo.SdrWhiteLevelInNits() / SCENE_REFERRED_SDR_WHITE_LEVEL;
 		} else {
-			colorInfo.maxLuminance = 1.0f;
-			colorInfo.sdrWhiteLevel = 1.0f;
+			_colorInfo.maxLuminance = 1.0f;
+			_colorInfo.sdrWhiteLevel = 1.0f;
 		}
 		
 		return true;
@@ -454,13 +454,13 @@ bool Renderer::_ObtainColorInfo(ColorInfo& colorInfo) noexcept {
 				if (desc.Monitor == _hCurMonitor) {
 					// DXGI 将 WCG 视为 SDR
 					if (desc.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020) {
-						colorInfo.kind = winrt::AdvancedColorKind::HighDynamicRange;
-						colorInfo.maxLuminance = desc.MaxLuminance / SCENE_REFERRED_SDR_WHITE_LEVEL;
-						colorInfo.sdrWhiteLevel = GetSDRWhiteLevel(desc.DeviceName);
+						_colorInfo.kind = winrt::AdvancedColorKind::HighDynamicRange;
+						_colorInfo.maxLuminance = desc.MaxLuminance / SCENE_REFERRED_SDR_WHITE_LEVEL;
+						_colorInfo.sdrWhiteLevel = GetSDRWhiteLevel(desc.DeviceName);
 					} else {
-						colorInfo.kind = winrt::AdvancedColorKind::StandardDynamicRange;
-						colorInfo.maxLuminance = 1.0f;
-						colorInfo.sdrWhiteLevel = 1.0f;
+						_colorInfo.kind = winrt::AdvancedColorKind::StandardDynamicRange;
+						_colorInfo.maxLuminance = 1.0f;
+						_colorInfo.sdrWhiteLevel = 1.0f;
 					}
 					
 					return true;
@@ -470,15 +470,15 @@ bool Renderer::_ObtainColorInfo(ColorInfo& colorInfo) noexcept {
 	}
 
 	// 未找到视为 SDR
-	colorInfo.kind = winrt::AdvancedColorKind::StandardDynamicRange;
-	colorInfo.maxLuminance = 1.0f;
-	colorInfo.sdrWhiteLevel = 1.0f;
+	_colorInfo.kind = winrt::AdvancedColorKind::StandardDynamicRange;
+	_colorInfo.maxLuminance = 1.0f;
+	_colorInfo.sdrWhiteLevel = 1.0f;
 	return true;
 }
 
-HRESULT Renderer::_UpdateColorInfo() noexcept {
+HRESULT Renderer::_UpdateColorSpace() noexcept {
 	ColorInfo oldColorInfo = _colorInfo;
-	if (!_ObtainColorInfo(_colorInfo)) {
+	if (!_UpdateColorInfo()) {
 		return E_FAIL;
 	}
 
@@ -488,18 +488,18 @@ HRESULT Renderer::_UpdateColorInfo() noexcept {
 
 	_UpdateWindowTitle();
 
+	// 等待 GPU 完成然后改变交换链格式
+	HRESULT hr = _swapChain.OnColorInfoChanged(_colorInfo);
+	if (FAILED(hr)) {
+		return hr;
+	}
+
 	// SDR<->其他的转换需要改变交换链格式和着色器
 	const bool shouldUpdateResources =
 		(oldColorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange) !=
 		(_colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange);
 
 	if (shouldUpdateResources) {
-		// 等待 GPU 完成然后改变交换链格式
-		HRESULT hr = _swapChain.OnColorInfoChanged(_colorInfo);
-		if (FAILED(hr)) {
-			return hr;
-		}
-
 		hr = _InitializePSO();
 		if (FAILED(hr)) {
 			return hr;

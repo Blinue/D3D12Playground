@@ -38,12 +38,9 @@ public:
 
 	HRESULT WaitForFenceValue(uint64_t fenceValue) noexcept;
 
-	HRESULT WaitForGPU() noexcept;
+	HRESULT WaitForGpu() noexcept;
 
-	HRESULT BeginFrame(
-		uint32_t& curFrameIndex,
-		ID3D12PipelineState* initialState = nullptr
-	) noexcept;
+	HRESULT BeginFrame(uint32_t& curFrameIndex, ID3D12PipelineState* initialState = nullptr) noexcept;
 
 	HRESULT EndFrame() noexcept;
 

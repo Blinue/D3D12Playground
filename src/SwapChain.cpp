@@ -184,7 +184,7 @@ HRESULT SwapChain::EndFrame() noexcept {
 		// 实用价值。
 
 		// 等待渲染完成
-		HRESULT hr = _graphicContext->WaitForGPU();
+		HRESULT hr = _graphicContext->WaitForGpu();
 		if (FAILED(hr)) {
 			return hr;
 		}
@@ -194,15 +194,6 @@ HRESULT SwapChain::EndFrame() noexcept {
 	}
 
 	return _dxgiSwapChain->Present(isRecreated ? 0 : 1, 0);
-}
-
-HRESULT SwapChain::OnSizeChanged(uint32_t width, uint32_t height) noexcept {
-	_width = width;
-	_height = height;
-	// 调整大小期间只用两个后备缓冲以提高流畅度并减少边缘闪烁
-	_bufferCount = _isResizing ? 2 : _graphicContext->GetMaxInFlightFrameCount() + 1;
-
-	return _RecreateBuffers();
 }
 
 void SwapChain::OnResizeStarted() noexcept {
@@ -220,6 +211,15 @@ HRESULT SwapChain::OnResizeEnded() noexcept {
 	if (_bufferCount == oldBufferCount) {
 		return S_OK;
 	}
+
+	return _RecreateBuffers();
+}
+
+HRESULT SwapChain::OnResized(uint32_t width, uint32_t height) noexcept {
+	_width = width;
+	_height = height;
+	// 调整大小期间只用两个后备缓冲以提高流畅度并减少边缘闪烁
+	_bufferCount = _isResizing ? 2 : _graphicContext->GetMaxInFlightFrameCount() + 1;
 
 	return _RecreateBuffers();
 }
@@ -242,7 +242,7 @@ HRESULT SwapChain::OnColorInfoChanged(const ColorInfo& colorInfo) noexcept {
 }
 
 HRESULT SwapChain::_RecreateBuffers() noexcept {
-	HRESULT hr = _graphicContext->WaitForGPU();
+	HRESULT hr = _graphicContext->WaitForGpu();
 	if (FAILED(hr)) {
 		return hr;
 	}
