@@ -18,6 +18,9 @@ private:
 	bool _Render() noexcept;
 
 	std::optional<Renderer> _renderer;
+
+	RECT _windowedRect{};
+
 	float _dpiScale = 1.0f;
 	// 用于区分调整大小和移动
 	bool _isPreparingForResize = false;

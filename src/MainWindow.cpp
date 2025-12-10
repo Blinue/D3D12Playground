@@ -148,6 +148,7 @@ LRESULT MainWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) noex
 		if (_renderer) {
 			_renderer->OnWindowPosChanged();
 		}
+
 		return 0;
 	}
 	case WM_SYSCOMMAND:
@@ -165,6 +166,7 @@ LRESULT MainWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) noex
 				_renderer->OnResizeStarted();
 			}
 		}
+
 		return 0;
 	}
 	case WM_EXITSIZEMOVE:
@@ -176,6 +178,7 @@ LRESULT MainWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) noex
 				_renderer->OnResizeEnded();
 			}
 		}
+
 		return 0;
 	}
 	case WM_DISPLAYCHANGE:
@@ -183,6 +186,46 @@ LRESULT MainWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) noex
 		if (_renderer) {
 			_renderer->OnDisplayChanged();
 		}
+
+		return 0;
+	}
+	case WM_KEYDOWN:
+	{
+		// 过滤长按按键产生的重复消息
+		if (wParam == 'F' && !(HIWORD(lParam) & KF_REPEAT)) {
+			if (GetWindowStyle(Handle()) & WS_CAPTION) {
+				// 全屏化
+				GetWindowRect(Handle(), & _windowedRect);
+
+				HMONITOR hMon = MonitorFromWindow(Handle(), MONITOR_DEFAULTTONEAREST);
+				MONITORINFO mi = { .cbSize = sizeof(mi) };
+				if (GetMonitorInfo(hMon, &mi)) {
+					SetWindowLongPtr(Handle(), GWL_STYLE, WS_POPUP | WS_VISIBLE);
+					SetWindowPos(
+						Handle(),
+						HWND_TOP,
+						mi.rcMonitor.left,
+						mi.rcMonitor.top,
+						mi.rcMonitor.right - mi.rcMonitor.left,
+						mi.rcMonitor.bottom - mi.rcMonitor.top,
+						SWP_FRAMECHANGED | SWP_NOACTIVATE
+					);
+				}
+			} else {
+				// 还原
+				SetWindowLongPtr(Handle(), GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_VISIBLE);
+				SetWindowPos(
+					Handle(),
+					HWND_TOP,
+					_windowedRect.left,
+					_windowedRect.top,
+					_windowedRect.right - _windowedRect.left,
+					_windowedRect.bottom - _windowedRect.top,
+					SWP_FRAMECHANGED | SWP_NOACTIVATE
+				);
+			}
+		}
+
 		return 0;
 	}
 	case WM_DESTROY:
