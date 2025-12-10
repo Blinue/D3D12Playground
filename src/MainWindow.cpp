@@ -128,15 +128,18 @@ LRESULT MainWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) noex
 		if (!wParam) {
 			return 0;
 		}
-
-		LRESULT ret = DefWindowProc(Handle(), WM_NCCALCSIZE, wParam, lParam);
-		if (ret != 0) {
-			return ret;
+		
+		// 全屏时移除系统边框
+		if (!_isFullscreen) {
+			LRESULT ret = DefWindowProc(Handle(), WM_NCCALCSIZE, wParam, lParam);
+			if (ret != 0) {
+				return ret;
+			}
 		}
 
 		if (_renderer) {
 			NCCALCSIZE_PARAMS& params = *(NCCALCSIZE_PARAMS*)lParam;
-			// 此时第一个成员是新窗口矩形
+			// 第一个成员是新客户区边界矩形
 			const RECT& clientRect = params.rgrc[0];
 			_renderer->OnResized(clientRect.right - clientRect.left, clientRect.bottom - clientRect.top, _dpiScale);
 		}
@@ -193,27 +196,9 @@ LRESULT MainWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) noex
 	{
 		// 过滤长按按键产生的重复消息
 		if (wParam == 'F' && !(HIWORD(lParam) & KF_REPEAT)) {
-			if (GetWindowStyle(Handle()) & WS_CAPTION) {
-				// 全屏化
-				GetWindowRect(Handle(), & _windowedRect);
-
-				HMONITOR hMon = MonitorFromWindow(Handle(), MONITOR_DEFAULTTONEAREST);
-				MONITORINFO mi = { .cbSize = sizeof(mi) };
-				if (GetMonitorInfo(hMon, &mi)) {
-					SetWindowLongPtr(Handle(), GWL_STYLE, WS_POPUP | WS_VISIBLE);
-					SetWindowPos(
-						Handle(),
-						HWND_TOP,
-						mi.rcMonitor.left,
-						mi.rcMonitor.top,
-						mi.rcMonitor.right - mi.rcMonitor.left,
-						mi.rcMonitor.bottom - mi.rcMonitor.top,
-						SWP_FRAMECHANGED | SWP_NOACTIVATE
-					);
-				}
-			} else {
+			if (_isFullscreen) {
 				// 还原
-				SetWindowLongPtr(Handle(), GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_VISIBLE);
+				_isFullscreen = false;
 				SetWindowPos(
 					Handle(),
 					HWND_TOP,
@@ -221,8 +206,26 @@ LRESULT MainWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) noex
 					_windowedRect.top,
 					_windowedRect.right - _windowedRect.left,
 					_windowedRect.bottom - _windowedRect.top,
-					SWP_FRAMECHANGED | SWP_NOACTIVATE
+					SWP_NOACTIVATE
 				);
+			} else {
+				// 全屏化
+				GetWindowRect(Handle(), &_windowedRect);
+
+				HMONITOR hMon = MonitorFromWindow(Handle(), MONITOR_DEFAULTTONEAREST);
+				MONITORINFO mi = { .cbSize = sizeof(mi) };
+				if (GetMonitorInfo(hMon, &mi)) {
+					_isFullscreen = true;
+					SetWindowPos(
+						Handle(),
+						HWND_TOP,
+						mi.rcMonitor.left,
+						mi.rcMonitor.top,
+						mi.rcMonitor.right - mi.rcMonitor.left,
+						mi.rcMonitor.bottom - mi.rcMonitor.top,
+						SWP_NOACTIVATE
+					);
+				}
 			}
 		}
 

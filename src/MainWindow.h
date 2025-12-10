@@ -25,4 +25,5 @@ private:
 	// 用于区分调整大小和移动
 	bool _isPreparingForResize = false;
 	bool _isResizing = false;
+	bool _isFullscreen = false;
 };
