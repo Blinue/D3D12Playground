@@ -87,27 +87,31 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 			return false;
 		}
 
-		heapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
-		if (FAILED(device->CreateCommittedResource(
-			&heapProperties,
-			D3D12_HEAP_FLAG_NONE,
-			&bufferDesc,
-			D3D12_RESOURCE_STATE_COMMON,
-			nullptr,
-			IID_PPV_ARGS(&_vertexBuffer)
-		))) {
-			return false;
-		}
+		// 集成显卡可高效使用上传堆
+		if (_graphicsContext.IsUMA()) {
+			_vertexBufferView.BufferLocation = _vertexUploadBuffer->GetGPUVirtualAddress();
+		} else {
+			heapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
+			if (FAILED(device->CreateCommittedResource(
+				&heapProperties,
+				D3D12_HEAP_FLAG_NONE,
+				&bufferDesc,
+				D3D12_RESOURCE_STATE_COMMON,
+				nullptr,
+				IID_PPV_ARGS(&_vertexBuffer)
+			))) {
+				return false;
+			}
 
-		_vertexBufferView.BufferLocation = _vertexBuffer->GetGPUVirtualAddress();
+			_vertexBufferView.BufferLocation = _vertexBuffer->GetGPUVirtualAddress();
+		}
+		
 		_vertexBufferView.StrideInBytes = sizeof(Vertex);
 		_vertexBufferView.SizeInBytes = vertexBufferSize;
 	}
 
-	if (Win32Helper::GetOSVersion().Is22H2OrNewer()) {
-		// 从 Win11 22H2 开始 DisplayInformation 支持桌面窗口。失败则回落到传统方法
-		_InitializeDisplayInformation();
-	}
+	// 失败则回落到使用传统方法获取颜色显示能力
+	_TryInitDisplayInfo();
 
 	if (!_UpdateColorInfo()) {
 		return false;
@@ -248,7 +252,7 @@ void Renderer::OnResized(uint32_t width, uint32_t height, float dpiScale) noexce
 	Render();
 }
 
-void Renderer::OnWindowPosChanged() noexcept {
+void Renderer::OnMsgWindowPosChanged() noexcept {
 	// winrt::DisplayInformation 可用时已通过事件监听颜色配置变化
 	if (_state != RendererState::NoError || _displayInfo) {
 		return;
@@ -263,7 +267,7 @@ void Renderer::OnWindowPosChanged() noexcept {
 	_CheckResult(_UpdateColorSpace());
 }
 
-void Renderer::OnDisplayChanged() noexcept {
+void Renderer::OnMsgDisplayChanged() noexcept {
 	if (_state != RendererState::NoError) {
 		return;
 	}
@@ -319,41 +323,45 @@ void Renderer::_UpdateSizeDependentResources(ID3D12GraphicsCommandList* commandL
 
 	memcpy(_vertexUploadBufferData, triangleVertices, sizeof(triangleVertices));
 
-	D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-		_vertexBuffer.get(),
-		_isVertexBufferInitialized ? D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER : D3D12_RESOURCE_STATE_COMMON,
-		D3D12_RESOURCE_STATE_COPY_DEST
-	);
-	commandList->ResourceBarrier(1, &barrier);
+	if (!_graphicsContext.IsUMA()) {
+		D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+			_vertexBuffer.get(),
+			_isVertexBufferInitialized ? D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER : D3D12_RESOURCE_STATE_COMMON,
+			D3D12_RESOURCE_STATE_COPY_DEST
+		);
+		commandList->ResourceBarrier(1, &barrier);
 
-	commandList->CopyResource(_vertexBuffer.get(), _vertexUploadBuffer.get());
+		commandList->CopyResource(_vertexBuffer.get(), _vertexUploadBuffer.get());
 
-	barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-	barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
-	commandList->ResourceBarrier(1, &barrier);
+		barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+		barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+		commandList->ResourceBarrier(1, &barrier);
 
-	_isVertexBufferInitialized = true;
+		_isVertexBufferInitialized = true;
+	}
 }
 
-bool Renderer::_InitializeDisplayInformation() noexcept {
-	static winrt::DispatcherQueueController dispatcherQueueController{ nullptr };
-	if (!dispatcherQueueController) {
-		// DisplayInformation 需要 DispatcherQueue
-		HRESULT hr = CreateDispatcherQueueController(
+bool Renderer::_TryInitDisplayInfo() noexcept {
+	// 从 Win11 22H2 开始支持
+	winrt::com_ptr<IDisplayInformationStaticsInterop> interop =
+		winrt::try_get_activation_factory<winrt::DisplayInformation, IDisplayInformationStaticsInterop>();
+	if (!interop) {
+		return false;
+	}
+
+	// DisplayInformation 需要 DispatcherQueue
+	static winrt::DispatcherQueueController dispatcherQueueController = [] {
+		winrt::DispatcherQueueController result{ nullptr };
+		CreateDispatcherQueueController(
 			DispatcherQueueOptions{
 				.dwSize = sizeof(DispatcherQueueOptions),
 				.threadType = DQTYPE_THREAD_CURRENT
 			},
-			(PDISPATCHERQUEUECONTROLLER*)winrt::put_abi(dispatcherQueueController)
+			(PDISPATCHERQUEUECONTROLLER*)winrt::put_abi(result)
 		);
-		if (FAILED(hr)) {
-			return false;
-		}
-	}
-
-	winrt::com_ptr<IDisplayInformationStaticsInterop> interop =
-		winrt::try_get_activation_factory<winrt::DisplayInformation, IDisplayInformationStaticsInterop>();
-	if (!interop) {
+		return result;
+	}();
+	if (!dispatcherQueueController) {
 		return false;
 	}
 

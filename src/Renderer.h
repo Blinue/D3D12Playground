@@ -27,14 +27,14 @@ public:
 
 	void OnResized(uint32_t width, uint32_t height, float dpiScale) noexcept;
 
-	void OnWindowPosChanged() noexcept;
+	void OnMsgWindowPosChanged() noexcept;
 
-	void OnDisplayChanged() noexcept;
+	void OnMsgDisplayChanged() noexcept;
 
 private:
 	void _UpdateSizeDependentResources(ID3D12GraphicsCommandList* commandList) noexcept;
 
-	bool _InitializeDisplayInformation() noexcept;
+	bool _TryInitDisplayInfo() noexcept;
 
 	bool _UpdateColorInfo() noexcept;
 

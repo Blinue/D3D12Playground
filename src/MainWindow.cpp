@@ -149,7 +149,7 @@ LRESULT MainWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) noex
 	case WM_WINDOWPOSCHANGED:
 	{
 		if (_renderer) {
-			_renderer->OnWindowPosChanged();
+			_renderer->OnMsgWindowPosChanged();
 		}
 
 		return 0;
@@ -187,7 +187,7 @@ LRESULT MainWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) noex
 	case WM_DISPLAYCHANGE:
 	{
 		if (_renderer) {
-			_renderer->OnDisplayChanged();
+			_renderer->OnMsgDisplayChanged();
 		}
 
 		return 0;

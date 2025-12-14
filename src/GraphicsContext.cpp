@@ -20,8 +20,17 @@ bool GraphicsContext::Initialize(uint32_t maxInFlightFrameCount) noexcept {
 		_rootSignatureVersion = featureData.HighestVersion;
 	}
 
+	// 检查是否是集成显卡
 	{
-		D3D12_COMMAND_QUEUE_DESC queueDesc{
+		D3D12_FEATURE_DATA_ARCHITECTURE1 value{};
+		if (FAILED(_device->CheckFeatureSupport(D3D12_FEATURE_ARCHITECTURE1, &value, sizeof(value)))) {
+			return false;
+		}
+		_isUMA = value.UMA;
+	}
+
+	{
+		D3D12_COMMAND_QUEUE_DESC queueDesc = {
 			.Type = D3D12_COMMAND_LIST_TYPE_DIRECT,
 			.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE
 		};
@@ -116,7 +125,7 @@ HRESULT GraphicsContext::EndFrame() noexcept {
 }
 
 bool GraphicsContext::CheckForBetterAdapter() noexcept {
-	if (!_isUsingWarp || _dxgiFactory->IsCurrent()) {
+	if (!_isWarp || _dxgiFactory->IsCurrent()) {
 		return false;
 	}
 
@@ -178,7 +187,7 @@ bool GraphicsContext::_CreateD3DDevice() noexcept {
 			D3D_FEATURE_LEVEL_11_0,
 			IID_PPV_ARGS(&_device)
 		))) {
-			_isUsingWarp = false;
+			_isWarp = false;
 			return true;
 		}
 	}
@@ -194,7 +203,7 @@ bool GraphicsContext::_CreateD3DDevice() noexcept {
 		D3D_FEATURE_LEVEL_11_0,
 		IID_PPV_ARGS(&_device)
 	))) {
-		_isUsingWarp = true;
+		_isWarp = true;
 		return true;
 	}
 

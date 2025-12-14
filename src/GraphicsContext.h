@@ -30,6 +30,10 @@ public:
 		return _rootSignatureVersion;
 	}
 
+	bool IsUMA() const noexcept {
+		return _isUMA;
+	}
+
 	uint32_t GetMaxInFlightFrameCount() const noexcept {
 		return (uint32_t)_commandAllocators.size();
 	}
@@ -66,5 +70,6 @@ private:
 
 	D3D_ROOT_SIGNATURE_VERSION _rootSignatureVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
 
-	bool _isUsingWarp = false;
+	bool _isWarp = false;
+	bool _isUMA = false;
 };
