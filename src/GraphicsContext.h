@@ -34,6 +34,10 @@ public:
 		return _isUMA;
 	}
 
+	bool IsHeapFlagCreateNotZeroedSupported() const noexcept {
+		return _isHeapFlagCreateNotZeroedSupported;
+	}
+
 	uint32_t GetMaxInFlightFrameCount() const noexcept {
 		return (uint32_t)_commandAllocators.size();
 	}
@@ -72,4 +76,5 @@ private:
 
 	bool _isWarp = false;
 	bool _isUMA = false;
+	bool _isHeapFlagCreateNotZeroedSupported = false;
 };

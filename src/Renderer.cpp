@@ -68,11 +68,14 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 	{
 		const UINT vertexBufferSize = sizeof(Vertex) * 22;
 
+		D3D12_HEAP_FLAGS heapFlag = _graphicsContext.IsHeapFlagCreateNotZeroedSupported() ?
+			D3D12_HEAP_FLAG_CREATE_NOT_ZEROED : D3D12_HEAP_FLAG_NONE;
+
 		CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_UPLOAD);
 		CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
 		if (FAILED(device->CreateCommittedResource(
 			&heapProperties,
-			D3D12_HEAP_FLAG_NONE,
+			heapFlag,
 			&bufferDesc,
 			D3D12_RESOURCE_STATE_GENERIC_READ,
 			nullptr,
@@ -94,7 +97,7 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 			heapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
 			if (FAILED(device->CreateCommittedResource(
 				&heapProperties,
-				D3D12_HEAP_FLAG_NONE,
+				heapFlag,
 				&bufferDesc,
 				D3D12_RESOURCE_STATE_COMMON,
 				nullptr,
