@@ -289,7 +289,7 @@ void Renderer::OnMsgDisplayChanged() noexcept {
 void Renderer::_UpdateSizeDependentResources(ID3D12GraphicsCommandList* commandList) noexcept {
 	const float squareWidth = 200.0f * _dpiScale / _width * 2.0f;
 	const float squareHeight = 200.0f * _dpiScale / _height * 2.0f;
-	Vertex triangleVertices[] = {
+	alignas(64) Vertex triangleVertices[] = {
 		// 左上
 		{ { -1.0f, 1.0f }, { 0.0f, 0.0f } },
 		{ { -1.0f + squareWidth, 1.0f }, { 1.0f, 0.0f } },
