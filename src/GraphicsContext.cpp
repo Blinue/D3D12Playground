@@ -13,25 +13,31 @@ bool GraphicsContext::Initialize(uint32_t maxInFlightFrameCount) noexcept {
 
 	// 检查根签名版本
 	{
-		D3D12_FEATURE_DATA_ROOT_SIGNATURE featureData = { .HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1 };
-		if (FAILED(_device->CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &featureData, sizeof(featureData)))) {
-			return false;
+		D3D12_FEATURE_DATA_ROOT_SIGNATURE data = { .HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1 };
+		if (SUCCEEDED(_device->CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &data, sizeof(data)))) {
+			_rootSignatureVersion = data.HighestVersion;
 		}
-		_rootSignatureVersion = featureData.HighestVersion;
 	}
 
 	// 检查是否是集成显卡
 	{
-		D3D12_FEATURE_DATA_ARCHITECTURE1 value{};
-		if (FAILED(_device->CheckFeatureSupport(D3D12_FEATURE_ARCHITECTURE1, &value, sizeof(value)))) {
-			return false;
+		D3D12_FEATURE_DATA_ARCHITECTURE1 data{};
+		if (SUCCEEDED(_device->CheckFeatureSupport(D3D12_FEATURE_ARCHITECTURE1, &data, sizeof(data)))) {
+			_isUMA = data.UMA;
 		}
-		_isUMA = value.UMA;
 	}
 
-	// 检查是否支持 D3D12_HEAP_FLAG_CREATE_NOT_ZEROED
+	// 检查 D3D12_HEAP_FLAG_CREATE_NOT_ZEROED 支持
 	// https://devblogs.microsoft.com/directx/coming-to-directx-12-more-control-over-memory-allocation/
 	_isHeapFlagCreateNotZeroedSupported = (bool)_device.try_as<ID3D12Device8>();
+	
+	// 检查 Resizable BAR 支持
+	{
+		D3D12_FEATURE_DATA_D3D12_OPTIONS16 data{};
+		if (SUCCEEDED(_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS16, &data, sizeof(data)))) {
+			_isGPUUploadHeapSupported = data.GPUUploadHeapSupported;
+		}
+	}
 
 	{
 		D3D12_COMMAND_QUEUE_DESC queueDesc = {

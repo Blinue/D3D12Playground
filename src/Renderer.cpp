@@ -70,14 +70,15 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 
 		D3D12_HEAP_FLAGS heapFlag = _graphicsContext.IsHeapFlagCreateNotZeroedSupported() ?
 			D3D12_HEAP_FLAG_CREATE_NOT_ZEROED : D3D12_HEAP_FLAG_NONE;
-
-		CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_UPLOAD);
+		CD3DX12_HEAP_PROPERTIES heapProperties(
+			_graphicsContext.IsGPUUploadHeapSupported() ? D3D12_HEAP_TYPE_GPU_UPLOAD : D3D12_HEAP_TYPE_UPLOAD);
 		CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
+
 		if (FAILED(device->CreateCommittedResource(
 			&heapProperties,
 			heapFlag,
 			&bufferDesc,
-			D3D12_RESOURCE_STATE_GENERIC_READ,
+			_graphicsContext.IsGPUUploadHeapSupported() ? D3D12_RESOURCE_STATE_COMMON : D3D12_RESOURCE_STATE_GENERIC_READ,
 			nullptr,
 			IID_PPV_ARGS(&_vertexUploadBuffer)
 		))) {
@@ -91,7 +92,7 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 		}
 
 		// 集成显卡可高效使用上传堆
-		if (_graphicsContext.IsUMA()) {
+		if (_graphicsContext.IsGPUUploadHeapSupported() || _graphicsContext.IsUMA()) {
 			_vertexBufferView.BufferLocation = _vertexUploadBuffer->GetGPUVirtualAddress();
 		} else {
 			heapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
@@ -326,7 +327,19 @@ void Renderer::_UpdateSizeDependentResources(ID3D12GraphicsCommandList* commandL
 
 	memcpy(_vertexUploadBufferData, triangleVertices, sizeof(triangleVertices));
 
-	if (!_graphicsContext.IsUMA()) {
+	if (_graphicsContext.IsGPUUploadHeapSupported()) {
+		if (!_isVertexBufferInitialized) {
+			// 创建时是 COMMON 状态，需一次转换
+			D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+				_vertexUploadBuffer.get(),
+				D3D12_RESOURCE_STATE_COMMON,
+				D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER
+			);
+			commandList->ResourceBarrier(1, &barrier);
+
+			_isVertexBufferInitialized = true;
+		}
+	} else if (!_graphicsContext.IsUMA()) {
 		D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
 			_vertexBuffer.get(),
 			_isVertexBufferInitialized ? D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER : D3D12_RESOURCE_STATE_COMMON,
