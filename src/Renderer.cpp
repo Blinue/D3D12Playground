@@ -7,9 +7,6 @@
 #include "shaders/sRGB_PS.h"
 #include "shaders/sRGB_PS_SM5.h"
 #include <dispatcherqueue.h>
-#ifdef _DEBUG
-#include <dxgidebug.h>
-#endif
 #include <windows.graphics.display.interop.h>
 
 static constexpr float SCENE_REFERRED_SDR_WHITE_LEVEL = 80.0f;
