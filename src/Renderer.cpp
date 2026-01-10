@@ -33,13 +33,6 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 	
 	[[maybe_unused]] static int _ = [] {
 #ifdef _DEBUG
-		winrt::com_ptr<IDXGIInfoQueue> dxgiInfoQueue;
-		if (SUCCEEDED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&dxgiInfoQueue)))) {
-			// 发生错误时中断
-			dxgiInfoQueue->SetBreakOnSeverity(DXGI_DEBUG_ALL, DXGI_INFO_QUEUE_MESSAGE_SEVERITY_CORRUPTION, true);
-			dxgiInfoQueue->SetBreakOnSeverity(DXGI_DEBUG_ALL, DXGI_INFO_QUEUE_MESSAGE_SEVERITY_ERROR, true);
-		}
-
 		{
 			winrt::com_ptr<ID3D12Debug1> debugController;
 			if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)))) {
