@@ -96,7 +96,7 @@
       <AdditionalDependencies>UxTheme.lib;Dwmapi.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <FxCompile>
-      <ShaderModel>5.0</ShaderModel>
+      <ShaderModel>6.0</ShaderModel>
       <AllResourcesBound>true</AllResourcesBound>
       <TreatWarningAsError>true</TreatWarningAsError>
       <VariableName>%(Filename)</VariableName>
@@ -165,6 +165,14 @@
     <Manifest Include="app.manifest" />
   </ItemGroup>
   <ItemGroup>
+    <FxCompile Include="shaders\AdvancedColor_PS_SM5.hlsl">
+      <ShaderType>Pixel</ShaderType>
+      <ShaderModel>5.1</ShaderModel>
+    </FxCompile>
+    <FxCompile Include="shaders\SimpleVS_SM5.hlsl">
+      <ShaderType>Vertex</ShaderType>
+      <ShaderModel>5.1</ShaderModel>
+    </FxCompile>
     <FxCompile Include="shaders\sRGB_PS.hlsl">
       <ShaderType>Pixel</ShaderType>
     </FxCompile>
@@ -174,8 +182,23 @@
     <FxCompile Include="shaders\AdvancedColor_PS.hlsl">
       <ShaderType>Pixel</ShaderType>
     </FxCompile>
+    <FxCompile Include="shaders\sRGB_PS_SM5.hlsl">
+      <ShaderType>Pixel</ShaderType>
+      <ShaderModel>5.1</ShaderModel>
+    </FxCompile>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <!-- SM6 使用 DXC 编译，需添加额外编译选项 -->
+  <Target Name="AddSM6AdditionalOptions" BeforeTargets="PrepareForBuild">
+    <ItemGroup>
+      <_SM6Shader Include="@(FxCompile)" Condition="'%(ShaderModel)' != '5.1'" />
+      <FxCompile Remove="@(_SM6Shader)" />
+      <FxCompile Include="@(_SM6Shader)">
+        <AdditionalOptions Condition="'$(Configuration)' == 'Debug'">-Qembed_debug %(_SM6Shader.AdditionalOptions)</AdditionalOptions>
+        <AdditionalOptions Condition="'$(Configuration)' == 'Release'">-O3 %(_SM6Shader.AdditionalOptions)</AdditionalOptions>
+      </FxCompile>
+    </ItemGroup>
+  </Target>
   <ImportGroup Label="ExtensionTargets">
     <Import Project="..\packages\Microsoft.Windows.CppWinRT.2.0.250303.1\build\native\Microsoft.Windows.CppWinRT.targets" Condition="Exists('..\packages\Microsoft.Windows.CppWinRT.2.0.250303.1\build\native\Microsoft.Windows.CppWinRT.targets')" />
     <Import Project="..\packages\Microsoft.Windows.ImplementationLibrary.1.0.250325.1\build\native\Microsoft.Windows.ImplementationLibrary.targets" Condition="Exists('..\packages\Microsoft.Windows.ImplementationLibrary.1.0.250325.1\build\native\Microsoft.Windows.ImplementationLibrary.targets')" />

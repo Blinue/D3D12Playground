@@ -42,6 +42,10 @@ public:
 		return _isGPUUploadHeapSupported;
 	}
 
+	bool IsSM6Supported() const noexcept {
+		return _isSM6Supported;
+	}
+
 	uint32_t GetMaxInFlightFrameCount() const noexcept {
 		return (uint32_t)_commandAllocators.size();
 	}
@@ -82,4 +86,5 @@ private:
 	bool _isUMA = false;
 	bool _isHeapFlagCreateNotZeroedSupported = false;
 	bool _isGPUUploadHeapSupported = false;
+	bool _isSM6Supported = false;
 };

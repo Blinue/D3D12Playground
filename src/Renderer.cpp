@@ -1,10 +1,11 @@
 #include "pch.h"
 #include "Renderer.h"
-#include "DirectXHelper.h"
 #include "shaders/AdvancedColor_PS.h"
+#include "shaders/AdvancedColor_PS_SM5.h"
 #include "shaders/SimpleVS.h"
+#include "shaders/SimpleVS_SM5.h"
 #include "shaders/sRGB_PS.h"
-#include "Win32Helper.h"
+#include "shaders/sRGB_PS_SM5.h"
 #include <dispatcherqueue.h>
 #ifdef _DEBUG
 #include <dxgidebug.h>
@@ -592,16 +593,33 @@ HRESULT Renderer::_InitializePSO() noexcept {
 		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
 	};
 
+	D3D12_SHADER_BYTECODE vsByteCode;
+	D3D12_SHADER_BYTECODE psByteCode;
+	if (_graphicsContext.IsSM6Supported()) {
+		vsByteCode = { SimpleVS, sizeof(SimpleVS) };
+
+		if (_colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange) {
+			psByteCode = { sRGB_PS, sizeof(sRGB_PS) };
+		} else {
+			psByteCode = { AdvancedColor_PS, sizeof(AdvancedColor_PS) };
+		}
+	} else {
+		vsByteCode = { SimpleVS_SM5, sizeof(SimpleVS_SM5) };
+
+		if (_colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange) {
+			psByteCode = { sRGB_PS_SM5, sizeof(sRGB_PS_SM5) };
+		} else {
+			psByteCode = { AdvancedColor_PS_SM5, sizeof(AdvancedColor_PS_SM5) };
+		}
+	}
+
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {
 		.pRootSignature = _rootSignature.get(),
-		.VS = {.pShaderBytecode = SimpleVS, .BytecodeLength = sizeof(SimpleVS) },
-		.PS = {
-			.pShaderBytecode = _colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange ?
-				sRGB_PS : AdvancedColor_PS,
-			.BytecodeLength = _colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange ?
-				sizeof(sRGB_PS) : sizeof(AdvancedColor_PS)
+		.VS = vsByteCode,
+		.PS = psByteCode,
+		.BlendState = {
+			.RenderTarget = {{ .RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL }}
 		},
-		.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT),
 		.SampleMask = UINT_MAX,
 		.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT),
 		.InputLayout = {
@@ -612,7 +630,7 @@ HRESULT Renderer::_InitializePSO() noexcept {
 		.NumRenderTargets = 1,
 		.RTVFormats = { _colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange ?
 		DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R16G16B16A16_FLOAT },
-		.SampleDesc = {.Count = 1 }
+		.SampleDesc = { .Count = 1 }
 	};
 	return device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&_pipelineState));
 }

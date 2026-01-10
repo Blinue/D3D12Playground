@@ -39,6 +39,14 @@ bool GraphicsContext::Initialize(uint32_t maxInFlightFrameCount) noexcept {
 		}
 	}
 
+	// 检查 shader model 6.0 支持
+	{
+		D3D12_FEATURE_DATA_SHADER_MODEL data = { .HighestShaderModel = D3D_SHADER_MODEL_6_0 };
+		if (SUCCEEDED(_device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &data, sizeof(data)))) {
+			_isSM6Supported = data.HighestShaderModel == D3D_SHADER_MODEL_6_0;
+		}
+	}
+
 	{
 		D3D12_COMMAND_QUEUE_DESC queueDesc = {
 			.Type = D3D12_COMMAND_LIST_TYPE_DIRECT,
@@ -185,7 +193,7 @@ bool GraphicsContext::_CreateD3DDevice() noexcept {
 	for (UINT adapterIdx = 0;
 		SUCCEEDED(_dxgiFactory->EnumAdapters1(adapterIdx, adapter.put()));
 		++adapterIdx
-		) {
+	) {
 		DXGI_ADAPTER_DESC1 desc;
 		HRESULT hr = adapter->GetDesc1(&desc);
 		if (FAILED(hr) || DirectXHelper::IsWARP(desc)) {
