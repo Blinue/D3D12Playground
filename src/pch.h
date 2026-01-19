@@ -44,3 +44,30 @@ using namespace Windows::System;
 
 using namespace std::string_literals;
 using namespace std::string_view_literals;
+
+enum class ComponentState {
+	NoError,
+	DeviceLost,
+	Error
+};
+
+struct Size {
+	uint32_t width;
+	uint32_t height;
+
+	bool operator==(const Size&) const noexcept = default;
+
+	explicit operator SIZE() const noexcept {
+		return { (LONG)width,(LONG)height };
+	}
+};
+
+struct ColorInfo {
+	winrt::AdvancedColorKind kind = winrt::AdvancedColorKind::StandardDynamicRange;
+	// HDR 模式下最大亮度，1.0 表示 80nit
+	float maxLuminance = 1.0f;
+	// HDR 模式下 SDR 内容亮度，1.0 表示 80nit
+	float sdrWhiteLevel = 1.0f;
+
+	bool operator==(const ColorInfo& other) const = default;
+};

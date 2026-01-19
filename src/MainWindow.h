@@ -26,4 +26,5 @@ private:
 	bool _isPreparingForResize = false;
 	bool _isResizing = false;
 	bool _isFullscreen = false;
+	bool _isMinimized = false;
 };

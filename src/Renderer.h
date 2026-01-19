@@ -1,13 +1,6 @@
 #pragma once
-#include "ColorInfo.h"
 #include "GraphicsContext.h"
 #include "SwapChain.h"
-
-enum class RendererState {
-	NoError,
-	DeviceLost,
-	Error
-};
 
 class Renderer {
 public:
@@ -17,15 +10,19 @@ public:
 
 	~Renderer();
 
-	bool Initialize(HWND hwndMain, uint32_t width, uint32_t height, float dpiScale) noexcept;
+	bool Initialize(HWND hwndMain, Size size, float dpiScale) noexcept;
 
-	RendererState Render() noexcept;
+	ComponentState Render(bool waitForGpu = false) noexcept;
+
+	Size GetSize() const noexcept {
+		return _size;
+	}
 
 	void OnResizeStarted() noexcept;
 
 	void OnResizeEnded() noexcept;
 
-	void OnResized(uint32_t width, uint32_t height, float dpiScale) noexcept;
+	void OnResized(Size size, float dpiScale) noexcept;
 
 	void OnMsgWindowPosChanged() noexcept;
 
@@ -48,10 +45,9 @@ private:
 
 	bool _CheckResult(HRESULT hr) noexcept;
 
-	RendererState _state = RendererState::NoError;
+	ComponentState _state = ComponentState::NoError;
 
-	uint32_t _width = 0;
-	uint32_t _height = 0;
+	Size _size{};
 	float _dpiScale = 1.0f;
 
 	GraphicsContext _graphicsContext;

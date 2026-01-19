@@ -49,7 +49,7 @@ bool MainWindow::Create() noexcept {
 	}
 
 	_renderer.emplace();
-	if (!_renderer->Initialize(Handle(), clientWidth, clientHeight, _dpiScale)) {
+	if (!_renderer->Initialize(Handle(), Size{ (uint32_t)clientWidth, (uint32_t)clientHeight }, _dpiScale)) {
 		return false;
 	}
 
@@ -74,7 +74,10 @@ int MainWindow::MessageLoop() noexcept {
 			DispatchMessage(&msg);
 		}
 
-		if (!_Render()) {
+		// 最小化时暂停渲染
+		if (_isMinimized) {
+			WaitMessage();
+		}else if (!_Render()) {
 			PostQuitMessage(1);
 		}
 	}
@@ -137,11 +140,29 @@ LRESULT MainWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) noex
 			}
 		}
 
+		const bool wasMinimized = _isMinimized;
+		_isMinimized = IsIconic(Handle());
+
 		if (_renderer) {
 			NCCALCSIZE_PARAMS& params = *(NCCALCSIZE_PARAMS*)lParam;
 			// 第一个成员是新客户区边界矩形
 			const RECT& clientRect = params.rgrc[0];
-			_renderer->OnResized(clientRect.right - clientRect.left, clientRect.bottom - clientRect.top, _dpiScale);
+			if (clientRect.right > clientRect.left && clientRect.bottom > clientRect.top) {
+				const Size clientSize = {
+					uint32_t(clientRect.right - clientRect.left),
+					uint32_t(clientRect.bottom - clientRect.top)
+				};
+
+				if (clientSize == _renderer->GetSize()) {
+					// 从最小化状态还原后强制渲染
+					if (wasMinimized && !_isMinimized) {
+						_renderer->Render(true);
+					}
+				} else {
+					_renderer->OnResized(clientSize, _dpiScale);
+					_renderer->Render();
+				}
+			}
 		}
 
 		return 0;
@@ -242,22 +263,26 @@ LRESULT MainWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) noex
 }
 
 bool MainWindow::_Render() noexcept {
-	RendererState state = _renderer->Render();
+	ComponentState state = _renderer->Render();
 
-	if (state == RendererState::NoError) {
+	if (state == ComponentState::NoError) {
 		return true;
-	} else if (state == RendererState::DeviceLost) {
+	} else if (state == ComponentState::DeviceLost) {
 		// 设备丢失重新创建 Renderer
 		_renderer.emplace();
 
 		RECT clientRect;
 		GetClientRect(Handle(), &clientRect);
-		if (!_renderer->Initialize(Handle(), clientRect.right - clientRect.left, clientRect.bottom - clientRect.top, _dpiScale)) {
+		Size clientSize = {
+			uint32_t(clientRect.right - clientRect.left),
+			uint32_t(clientRect.bottom - clientRect.top)
+		};
+		if (!_renderer->Initialize(Handle(), clientSize, _dpiScale)) {
 			return false;
 		}
 
 		// 如果设备再次丢失不再尝试恢复
-		return _renderer->Render() == RendererState::NoError;
+		return _renderer->Render() == ComponentState::NoError;
 	} else {
 		return false;
 	}

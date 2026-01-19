@@ -8,13 +8,11 @@
 bool SwapChain::Initialize(
 	GraphicsContext& graphicContext,
 	HWND hwndAttach,
-	uint32_t width,
-	uint32_t height,
+	Size size,
 	const ColorInfo& colorInfo
 ) noexcept {
 	_graphicContext = &graphicContext;
-	_width = width;
-	_height = height;
+	_size = size;
 	_isScRGB = colorInfo.kind != winrt::AdvancedColorKind::StandardDynamicRange;
 
 	IDXGIFactory7* dxgiFactory = graphicContext.GetDXGIFactory();
@@ -35,8 +33,8 @@ bool SwapChain::Initialize(
 	_bufferCount = graphicContext.GetMaxInFlightFrameCount() + 1;
 
 	DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {
-		.Width = width,
-		.Height = height,
+		.Width = size.width,
+		.Height = size.height,
 		// 默认色域正是我们想要的，无需额外设置
 		.Format = _isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM,
 		.SampleDesc = {
@@ -165,9 +163,9 @@ static void WaitForDwmComposition() noexcept {
 	}
 }
 
-HRESULT SwapChain::EndFrame() noexcept {
+HRESULT SwapChain::EndFrame(bool waitForGpu) noexcept {
 	const bool isRecreated = std::exchange(_isRecreated, false);
-	if (isRecreated) {
+	if (isRecreated || waitForGpu) {
 		// 下面两个调用用于减少调整窗口尺寸时的边缘闪烁。
 		// 
 		// 我们希望 DWM 绘制新的窗口框架时刚好合成新帧，但这不是我们能控制的，尤其是混合架构
@@ -215,9 +213,8 @@ HRESULT SwapChain::OnResizeEnded() noexcept {
 	return _RecreateBuffers();
 }
 
-HRESULT SwapChain::OnResized(uint32_t width, uint32_t height) noexcept {
-	_width = width;
-	_height = height;
+HRESULT SwapChain::OnResized(Size size) noexcept {
+	_size = size;
 	// 调整大小期间只用两个后备缓冲以提高流畅度并减少边缘闪烁
 	_bufferCount = _isResizing ? 2 : _graphicContext->GetMaxInFlightFrameCount() + 1;
 
@@ -252,7 +249,7 @@ HRESULT SwapChain::_RecreateBuffers() noexcept {
 	// 不要更改最大帧延迟，一来调整大小期间不会有帧排队，二来交换链不大支持中途改变
 	// 最大帧延迟，需要额外等待 FrameLatencyWaitableObject 来修正内部状态。
 	hr = _dxgiSwapChain->ResizeBuffers(
-		_bufferCount, _width, _height,
+		_bufferCount, _size.width, _size.height,
 		_isScRGB ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM,
 		UINT((_isTearingSupported ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0)
 			| DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT)

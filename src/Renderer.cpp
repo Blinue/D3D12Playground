@@ -20,11 +20,10 @@ Renderer::~Renderer() {
 	_graphicsContext.WaitForGpu();
 }
 
-bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float dpiScale) noexcept {
+bool Renderer::Initialize(HWND hwndMain, Size size, float dpiScale) noexcept {
 	_hwndMain = hwndMain;
 	_dpiScale = dpiScale;
-	_width = width;
-	_height = height;
+	_size = size;
 
 	_hCurMonitor = MonitorFromWindow(hwndMain, MONITOR_DEFAULTTONEAREST);
 	
@@ -114,7 +113,7 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 
 	_UpdateWindowTitle();
 
-	if (!_swapChain.Initialize(_graphicsContext, hwndMain, width, height, _colorInfo)) {
+	if (!_swapChain.Initialize(_graphicsContext, hwndMain, size, _colorInfo)) {
 		return false;
 	}
 
@@ -125,8 +124,8 @@ bool Renderer::Initialize(HWND hwndMain, uint32_t width, uint32_t height, float 
 	return true;
 }
 
-RendererState Renderer::Render() noexcept {
-	if (_state != RendererState::NoError) {
+ComponentState Renderer::Render(bool waitForGpu) noexcept {
+	if (_state != ComponentState::NoError) {
 		return _state;
 	}
 
@@ -158,11 +157,11 @@ RendererState Renderer::Render() noexcept {
 	}
 
 	{
-		CD3DX12_VIEWPORT viewport(0.0f, 0.0f, (float)_width, (float)_height);
+		CD3DX12_VIEWPORT viewport(0.0f, 0.0f, (float)_size.width, (float)_size.height);
 		commandList->RSSetViewports(1, &viewport);
 	}
 	{
-		CD3DX12_RECT scissorRect(0, 0, (LONG)_width, (LONG)_height);
+		CD3DX12_RECT scissorRect(0, 0, (LONG)_size.width, (LONG)_size.height);
 		commandList->RSSetScissorRects(1, &scissorRect);
 	}
 	
@@ -200,7 +199,7 @@ RendererState Renderer::Render() noexcept {
 
 	_graphicsContext.GetCommandQueue()->ExecuteCommandLists(1, CommandListCast(&commandList));
 
-	if (!_CheckResult(_swapChain.EndFrame())) {
+	if (!_CheckResult(_swapChain.EndFrame(waitForGpu))) {
 		return _state;
 	}
 
@@ -210,7 +209,7 @@ RendererState Renderer::Render() noexcept {
 }
 
 void Renderer::OnResizeStarted() noexcept {
-	if (_state != RendererState::NoError) {
+	if (_state != ComponentState::NoError) {
 		return;
 	}
 
@@ -218,38 +217,33 @@ void Renderer::OnResizeStarted() noexcept {
 }
 
 void Renderer::OnResizeEnded() noexcept {
-	if (_state != RendererState::NoError) {
+	if (_state != ComponentState::NoError) {
 		return;
 	}
 
 	_CheckResult(_swapChain.OnResizeEnded());
 }
 
-void Renderer::OnResized(uint32_t width, uint32_t height, float dpiScale) noexcept {
-	if (_state != RendererState::NoError) {
+void Renderer::OnResized(Size size, float dpiScale) noexcept {
+	// 确保尺寸变化后调用
+	assert(size.width > 0 && size.height > 0 && size != _size);
+
+	if (_state != ComponentState::NoError) {
 		return;
 	}
 
-	if (width == _width && height == _height && dpiScale == _dpiScale) {
-		return;
-	}
-
-	_width = width;
-	_height = height;
+	_size = size;
 	_dpiScale = dpiScale;
 	_shouldUpdateSizeDependentResources = true;
-
-	// 会等待 GPU
-	if (!_CheckResult(_swapChain.OnResized(width, height))) {
+	
+	if (!_CheckResult(_swapChain.OnResized(size))) {
 		return;
 	}
-
-	Render();
 }
 
 void Renderer::OnMsgWindowPosChanged() noexcept {
 	// winrt::DisplayInformation 可用时已通过事件监听颜色配置变化
-	if (_state != RendererState::NoError || _displayInfo) {
+	if (_state != ComponentState::NoError || _displayInfo) {
 		return;
 	}
 
@@ -263,14 +257,14 @@ void Renderer::OnMsgWindowPosChanged() noexcept {
 }
 
 void Renderer::OnMsgDisplayChanged() noexcept {
-	if (_state != RendererState::NoError) {
+	if (_state != ComponentState::NoError) {
 		return;
 	}
 
 	// 如果正在使用 WARP 渲染则检测是否有显卡连接了
 	if (_graphicsContext.CheckForBetterAdapter()) {
 		// 强制重新创建 D3D 设备
-		_state = RendererState::DeviceLost;
+		_state = ComponentState::DeviceLost;
 		return;
 	}
 
@@ -282,8 +276,8 @@ void Renderer::OnMsgDisplayChanged() noexcept {
 
 // 调用前需等待 GPU 完成
 void Renderer::_UpdateSizeDependentResources(ID3D12GraphicsCommandList* commandList) noexcept {
-	const float squareWidth = 200.0f * _dpiScale / _width * 2.0f;
-	const float squareHeight = 200.0f * _dpiScale / _height * 2.0f;
+	const float squareWidth = 200.0f * _dpiScale / _size.width * 2.0f;
+	const float squareHeight = 200.0f * _dpiScale / _size.height * 2.0f;
 	alignas(64) Vertex triangleVertices[] = {
 		// 左上
 		{ { -1.0f, 1.0f }, { 0.0f, 0.0f } },
@@ -379,7 +373,7 @@ bool Renderer::_TryInitDisplayInfo() noexcept {
 	_acInfoChangedRevoker = _displayInfo.AdvancedColorInfoChanged(
 		winrt::auto_revoke,
 		[this](winrt::DisplayInformation const&, winrt::IInspectable const&) {
-			if (_state == RendererState::NoError) {
+			if (_state == ComponentState::NoError) {
 				_CheckResult(_UpdateColorSpace());
 			}
 		}
@@ -626,25 +620,25 @@ HRESULT Renderer::_InitializePSO() noexcept {
 }
 
 bool Renderer::_CheckResult(bool success) noexcept {
-	assert(_state == RendererState::NoError);
+	assert(_state == ComponentState::NoError);
 
 	if (!success) {
-		_state = RendererState::Error;
+		_state = ComponentState::Error;
 	}
 	return success;
 }
 
 bool Renderer::_CheckResult(HRESULT hr) noexcept {
-	assert(_state == RendererState::NoError);
+	assert(_state == ComponentState::NoError);
 
 	if (SUCCEEDED(hr)) {
 		return true;
 	}
 	
 	if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
-		_state = RendererState::DeviceLost;
+		_state = ComponentState::DeviceLost;
 	} else {
-		_state = RendererState::Error;
+		_state = ComponentState::Error;
 	}
 
 	return false;

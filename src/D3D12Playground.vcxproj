@@ -143,7 +143,6 @@
     <ClCompile Include="Win32Helper.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="ColorInfo.h" />
     <ClInclude Include="DirectXHelper.h" />
     <ClInclude Include="GraphicsContext.h" />
     <ClInclude Include="MainWindow.h" />
