@@ -140,7 +140,6 @@ LRESULT MainWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) noex
 			}
 		}
 
-		const bool wasMinimized = _isMinimized;
 		_isMinimized = IsIconic(Handle());
 
 		if (_renderer) {
@@ -153,12 +152,7 @@ LRESULT MainWindow::_MessageHandler(UINT msg, WPARAM wParam, LPARAM lParam) noex
 					uint32_t(clientRect.bottom - clientRect.top)
 				};
 
-				if (clientSize == _renderer->GetSize()) {
-					// 从最小化状态还原后强制渲染
-					if (wasMinimized && !_isMinimized) {
-						_renderer->Render(true);
-					}
-				} else {
+				if (clientSize != _renderer->GetSize()) {
 					_renderer->OnResized(clientSize, _dpiScale);
 					_renderer->Render();
 				}

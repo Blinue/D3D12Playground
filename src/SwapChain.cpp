@@ -202,18 +202,19 @@ void SwapChain::OnResizeStarted() noexcept {
 HRESULT SwapChain::OnResizeEnded() noexcept {
 	_isResizing = false;
 
-	// 恢复后备缓冲数量
 	const uint32_t oldBufferCount = _bufferCount;
 	_bufferCount = _graphicContext->GetMaxInFlightFrameCount() + 1;
 
 	if (_bufferCount == oldBufferCount) {
 		return S_OK;
+	} else {
+		return _RecreateBuffers();
 	}
-
-	return _RecreateBuffers();
 }
 
 HRESULT SwapChain::OnResized(Size size) noexcept {
+	assert(size.width > 0 && size.height > 0 && size != _size);
+
 	_size = size;
 	// 调整大小期间只用两个后备缓冲以提高流畅度并减少边缘闪烁
 	_bufferCount = _isResizing ? 2 : _graphicContext->GetMaxInFlightFrameCount() + 1;
