@@ -533,20 +533,17 @@ void Renderer::_UpdateWindowTitle() const noexcept {
 HRESULT Renderer::_InitializePSO() noexcept {
 	// 创建根签名
 	winrt::com_ptr<ID3DBlob> signature;
-	winrt::com_ptr<ID3DBlob> error;
-	D3D_ROOT_SIGNATURE_VERSION rootSignatureVersion = _graphicsContext.GetRootSignatureVersion();
-
 	if (_colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange) {
 		CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc(
 			0, (D3D12_ROOT_PARAMETER1*)nullptr, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
 		HRESULT hr = D3DX12SerializeVersionedRootSignature(
-			&rootSignatureDesc, rootSignatureVersion, signature.put(), error.put());
+			&rootSignatureDesc, _graphicsContext.GetRootSignatureVersion(), signature.put(), nullptr);
 		if (FAILED(hr)) {
 			return hr;
 		}
 	} else {
-		D3D12_ROOT_PARAMETER1 rootParam{
+		D3D12_ROOT_PARAMETER1 rootParam = {
 			.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS,
 			.Constants = {
 				.Num32BitValues = 1
@@ -557,7 +554,7 @@ HRESULT Renderer::_InitializePSO() noexcept {
 			1, &rootParam, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
 		HRESULT hr = D3DX12SerializeVersionedRootSignature(
-			&rootSignatureDesc, rootSignatureVersion, signature.put(), error.put());
+			&rootSignatureDesc, _graphicsContext.GetRootSignatureVersion(), signature.put(), nullptr);
 		if (FAILED(hr)) {
 			return hr;
 		}
