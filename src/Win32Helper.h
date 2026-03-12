@@ -56,4 +56,6 @@ struct Win32Helper {
 	};
 
 	static const OSVersion& GetOSVersion() noexcept;
+
+	static const std::filesystem::path& GetExePath() noexcept;
 };

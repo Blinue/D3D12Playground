@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "D3D12Context.h"
 #include "DirectXHelper.h"
+#include "Win32Helper.h"
 
 bool D3D12Context::Initialize(uint32_t maxInFlightFrameCount) noexcept {
 	if (FAILED(_CreateDXGIFactory())) {
@@ -196,6 +197,34 @@ HRESULT D3D12Context::_CreateDXGIFactory() noexcept {
 	return CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&_dxgiFactory));
 }
 
+// 和 D3D12SDKLayers.dll 不同，OS 加载 d3d10warp.dll 时不遵循 D3D12SDKPath。
+// 这个函数确保加载匹配的 d3d10warp.dll。
+static void FixD3D10WarpDll(IDXGIAdapter1* warpAdapter) noexcept {
+	assert(!GetModuleHandle(L"d3d10warp.dll"));
+
+	HMODULE hD3D12Core = GetModuleHandle(L"D3D12Core.dll");
+	if (!hD3D12Core) {
+		// 如果 D3D12Core.dll 尚未加载则加载它
+		D3D12CreateDevice(warpAdapter, D3D_FEATURE_LEVEL_11_0, winrt::guid_of<ID3D12Device>(), nullptr);
+
+		hD3D12Core = GetModuleHandle(L"D3D12Core.dll");
+		if (!hD3D12Core) {
+			// 可能 OS 不支持 Agility SDK
+			return;
+		}
+	}
+
+	// 检查是否加载了随程序部署的 D3D12Core.dll
+	std::wstring d3d12CorePath;
+	wil::GetModuleFileNameW(hD3D12Core, d3d12CorePath);
+	std::filesystem::path exeDir = Win32Helper::GetExePath().parent_path();
+	if (d3d12CorePath.starts_with(exeDir.native())) {
+		// 加载随程序部署的 d3d10warp.dll
+		std::filesystem::path warpDllPath = exeDir / L"D3D12\\d3d10warp.dll";
+		LoadLibrary(warpDllPath.c_str());
+	}
+}
+
 bool D3D12Context::_CreateD3DDevice() noexcept {
 	// 枚举查找第一个支持 D3D12 的显卡
 	winrt::com_ptr<IDXGIAdapter1> adapter;
@@ -224,6 +253,11 @@ bool D3D12Context::_CreateD3DDevice() noexcept {
 	if (FAILED(_dxgiFactory->EnumWarpAdapter(IID_PPV_ARGS(&adapter)))) {
 		return false;
 	}
+
+	[[maybe_unused]] static int _ = [](IDXGIAdapter1* warpAdapter) {
+		FixD3D10WarpDll(warpAdapter);
+		return 0;
+	}(adapter.get());
 
 	if (SUCCEEDED(D3D12CreateDevice(
 		adapter.get(),

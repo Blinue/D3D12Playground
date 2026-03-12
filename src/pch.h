@@ -22,10 +22,17 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <filesystem>
 
 // WIL
 #include <wil/resource.h>
 #include <wil/win32_helpers.h>
+// 防止编译失败
+#define WIL_ENABLE_EXCEPTIONS
+#define RESOURCE_SUPPRESS_STL
+#include <wil/stl.h>
+#undef RESOURCE_SUPPRESS_STL
+#undef WIL_ENABLE_EXCEPTIONS
 
 // C++/WinRT
 #include <unknwn.h>

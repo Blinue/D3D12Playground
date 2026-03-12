@@ -17,3 +17,12 @@ const Win32Helper::OSVersion& Win32Helper::GetOSVersion() noexcept {
 
 	return version;
 }
+
+const std::filesystem::path& Win32Helper::GetExePath() noexcept {
+	static std::filesystem::path result = [] {
+		std::wstring exePath;
+		FAIL_FAST_IF_FAILED(wil::GetModuleFileNameW(NULL, exePath));
+		return std::filesystem::path(std::move(exePath));
+	}();
+	return result;
+}
