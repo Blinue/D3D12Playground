@@ -29,7 +29,7 @@ jobs:
       run: msbuild D3D12Playground.slnx /restore "/p:Platform=x64;Configuration=Release;RestorePackagesConfig=true;DisablePDB=true;PlatformToolset=ClangCL"
 
     - name: Upload build artifacts
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v7
       with:
         name: D3D12Playground-${{ matrix.compiler }}
         path: bin\x64\Release
