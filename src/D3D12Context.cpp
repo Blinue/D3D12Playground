@@ -1,8 +1,8 @@
 #include "pch.h"
-#include "GraphicsContext.h"
+#include "D3D12Context.h"
 #include "DirectXHelper.h"
 
-bool GraphicsContext::Initialize(uint32_t maxInFlightFrameCount) noexcept {
+bool D3D12Context::Initialize(uint32_t maxInFlightFrameCount) noexcept {
 	if (FAILED(_CreateDXGIFactory())) {
 		return false;
 	}
@@ -88,7 +88,7 @@ bool GraphicsContext::Initialize(uint32_t maxInFlightFrameCount) noexcept {
 	return true;
 }
 
-IDXGIFactory7* GraphicsContext::GetDXGIFactoryForEnumingAdapters() noexcept {
+IDXGIFactory7* D3D12Context::GetDXGIFactoryForEnumingAdapters() noexcept {
 	if (!_dxgiFactory->IsCurrent()) {
 		HRESULT hr = _CreateDXGIFactory();
 		if (FAILED(hr)) {
@@ -99,12 +99,12 @@ IDXGIFactory7* GraphicsContext::GetDXGIFactoryForEnumingAdapters() noexcept {
 	return _dxgiFactory.get();
 }
 
-HRESULT GraphicsContext::Signal(uint64_t& fenceValue) noexcept {
+HRESULT D3D12Context::Signal(uint64_t& fenceValue) noexcept {
 	fenceValue = ++_curFenceValue;
 	return _commandQueue->Signal(_fence.get(), _curFenceValue);
 }
 
-HRESULT GraphicsContext::WaitForFenceValue(uint64_t fenceValue) noexcept {
+HRESULT D3D12Context::WaitForFenceValue(uint64_t fenceValue) noexcept {
 	if (_fence->GetCompletedValue() >= fenceValue) {
 		return S_OK;
 	} else {
@@ -112,7 +112,7 @@ HRESULT GraphicsContext::WaitForFenceValue(uint64_t fenceValue) noexcept {
 	}
 }
 
-HRESULT GraphicsContext::WaitForGpu() noexcept {
+HRESULT D3D12Context::WaitForGpu() noexcept {
 	HRESULT hr = _commandQueue->Signal(_fence.get(), ++_curFenceValue);
 	if (FAILED(hr)) {
 		return hr;
@@ -121,7 +121,7 @@ HRESULT GraphicsContext::WaitForGpu() noexcept {
 	return WaitForFenceValue(_curFenceValue);
 }
 
-HRESULT GraphicsContext::BeginFrame(uint32_t& curFrameIndex, ID3D12PipelineState* initialState) noexcept {
+HRESULT D3D12Context::BeginFrame(uint32_t& curFrameIndex, ID3D12PipelineState* initialState) noexcept {
 	HRESULT hr = WaitForFenceValue(_frameFenceValues[_curFrameIndex]);
 	if (FAILED(hr)) {
 		return hr;
@@ -141,7 +141,7 @@ HRESULT GraphicsContext::BeginFrame(uint32_t& curFrameIndex, ID3D12PipelineState
 	return S_OK;
 }
 
-HRESULT GraphicsContext::EndFrame() noexcept {
+HRESULT D3D12Context::EndFrame() noexcept {
 	HRESULT hr = Signal(_frameFenceValues[_curFrameIndex]);
 	if (FAILED(hr)) {
 		return hr;
@@ -151,7 +151,7 @@ HRESULT GraphicsContext::EndFrame() noexcept {
 	return S_OK;
 }
 
-bool GraphicsContext::CheckForBetterAdapter() noexcept {
+bool D3D12Context::CheckForBetterAdapter() noexcept {
 	if (!_isWarp || _dxgiFactory->IsCurrent()) {
 		return false;
 	}
@@ -188,7 +188,7 @@ bool GraphicsContext::CheckForBetterAdapter() noexcept {
 	return false;
 }
 
-HRESULT GraphicsContext::_CreateDXGIFactory() noexcept {
+HRESULT D3D12Context::_CreateDXGIFactory() noexcept {
 	UINT dxgiFactoryFlags = 0;
 #ifdef _DEBUG
 	dxgiFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
@@ -196,7 +196,7 @@ HRESULT GraphicsContext::_CreateDXGIFactory() noexcept {
 	return CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&_dxgiFactory));
 }
 
-bool GraphicsContext::_CreateD3DDevice() noexcept {
+bool D3D12Context::_CreateD3DDevice() noexcept {
 	// 枚举查找第一个支持 D3D12 的显卡
 	winrt::com_ptr<IDXGIAdapter1> adapter;
 	for (UINT adapterIdx = 0;

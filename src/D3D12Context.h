@@ -1,10 +1,10 @@
 #pragma once
 
-class GraphicsContext {
+class D3D12Context {
 public:
-	GraphicsContext() = default;
-	GraphicsContext(const GraphicsContext&) = delete;
-	GraphicsContext(GraphicsContext&&) = default;
+	D3D12Context() = default;
+	D3D12Context(const D3D12Context&) = delete;
+	D3D12Context(D3D12Context&&) = default;
 
 	bool Initialize(uint32_t maxInFlightFrameCount) noexcept;
 

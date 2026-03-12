@@ -11,13 +11,18 @@
 
 static constexpr float SCENE_REFERRED_SDR_WHITE_LEVEL = 80.0f;
 
-struct Vertex {
+struct VertexPositionTexture {
 	DirectX::XMFLOAT2 position;
-	DirectX::XMFLOAT2 coord;
+	DirectX::XMFLOAT2 texCoord;
+
+	static constexpr D3D12_INPUT_ELEMENT_DESC InputElements[] = {
+		{ "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+	};
 };
 
 Renderer::~Renderer() {
-	_graphicsContext.WaitForGpu();
+	_d3d12Context.WaitForGpu();
 }
 
 bool Renderer::Initialize(HWND hwndMain, Size size, float dpiScale) noexcept {
@@ -49,26 +54,26 @@ bool Renderer::Initialize(HWND hwndMain, Size size, float dpiScale) noexcept {
 		return 0;
 	}();
 
-	if (!_graphicsContext.Initialize(2)) {
+	if (!_d3d12Context.Initialize(2)) {
 		return false;
 	}
 
-	ID3D12Device5* device = _graphicsContext.GetDevice();
+	ID3D12Device5* device = _d3d12Context.GetDevice();
 
 	{
-		const UINT vertexBufferSize = sizeof(Vertex) * 22;
+		const UINT vertexBufferSize = sizeof(VertexPositionTexture) * 22;
 
-		D3D12_HEAP_FLAGS heapFlag = _graphicsContext.IsHeapFlagCreateNotZeroedSupported() ?
+		D3D12_HEAP_FLAGS heapFlag = _d3d12Context.IsHeapFlagCreateNotZeroedSupported() ?
 			D3D12_HEAP_FLAG_CREATE_NOT_ZEROED : D3D12_HEAP_FLAG_NONE;
 		CD3DX12_HEAP_PROPERTIES heapProperties(
-			_graphicsContext.IsGPUUploadHeapSupported() ? D3D12_HEAP_TYPE_GPU_UPLOAD : D3D12_HEAP_TYPE_UPLOAD);
+			_d3d12Context.IsGPUUploadHeapSupported() ? D3D12_HEAP_TYPE_GPU_UPLOAD : D3D12_HEAP_TYPE_UPLOAD);
 		CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
 
 		if (FAILED(device->CreateCommittedResource(
 			&heapProperties,
 			heapFlag,
 			&bufferDesc,
-			_graphicsContext.IsGPUUploadHeapSupported() ? D3D12_RESOURCE_STATE_COMMON : D3D12_RESOURCE_STATE_GENERIC_READ,
+			_d3d12Context.IsGPUUploadHeapSupported() ? D3D12_RESOURCE_STATE_COMMON : D3D12_RESOURCE_STATE_GENERIC_READ,
 			nullptr,
 			IID_PPV_ARGS(&_vertexUploadBuffer)
 		))) {
@@ -82,7 +87,7 @@ bool Renderer::Initialize(HWND hwndMain, Size size, float dpiScale) noexcept {
 		}
 
 		// 集成显卡可高效使用上传堆
-		if (_graphicsContext.IsGPUUploadHeapSupported() || _graphicsContext.IsUMA()) {
+		if (_d3d12Context.IsGPUUploadHeapSupported() || _d3d12Context.IsUMA()) {
 			_vertexBufferView.BufferLocation = _vertexUploadBuffer->GetGPUVirtualAddress();
 		} else {
 			heapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
@@ -100,7 +105,7 @@ bool Renderer::Initialize(HWND hwndMain, Size size, float dpiScale) noexcept {
 			_vertexBufferView.BufferLocation = _vertexBuffer->GetGPUVirtualAddress();
 		}
 		
-		_vertexBufferView.StrideInBytes = sizeof(Vertex);
+		_vertexBufferView.StrideInBytes = sizeof(VertexPositionTexture);
 		_vertexBufferView.SizeInBytes = vertexBufferSize;
 	}
 
@@ -113,7 +118,7 @@ bool Renderer::Initialize(HWND hwndMain, Size size, float dpiScale) noexcept {
 
 	_UpdateWindowTitle();
 
-	if (!_swapChain.Initialize(_graphicsContext, hwndMain, size, _colorInfo)) {
+	if (!_swapChain.Initialize(_d3d12Context, hwndMain, size, _colorInfo)) {
 		return false;
 	}
 
@@ -129,18 +134,18 @@ ComponentState Renderer::Render(bool waitForGpu) noexcept {
 		return _state;
 	}
 
-	// SwapChain::BeginFrame 和 GraphicsContext::BeginFrame 无顺序要求，不过
+	// SwapChain::BeginFrame 和 D3D12Context::BeginFrame 无顺序要求，不过
 	// 前者通常等待时间更久，将它放在前面可以减少等待次数。
 	ID3D12Resource* frameTex;
 	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle;
 	_swapChain.BeginFrame(&frameTex, rtvHandle);
 
 	uint32_t frameIndex;
-	if (!_CheckResult(_graphicsContext.BeginFrame(frameIndex, _pipelineState.get()))) {
+	if (!_CheckResult(_d3d12Context.BeginFrame(frameIndex, _pipelineState.get()))) {
 		return _state;
 	}
 
-	ID3D12GraphicsCommandList* commandList = _graphicsContext.GetCommandList();
+	ID3D12GraphicsCommandList* commandList = _d3d12Context.GetCommandList();
 	
 	if (_shouldUpdateSizeDependentResources) {
 		_shouldUpdateSizeDependentResources = false;
@@ -197,14 +202,14 @@ ComponentState Renderer::Render(bool waitForGpu) noexcept {
 		return _state;
 	}
 
-	_graphicsContext.GetCommandQueue()->ExecuteCommandLists(1, CommandListCast(&commandList));
+	_d3d12Context.GetCommandQueue()->ExecuteCommandLists(1, CommandListCast(&commandList));
 
 	if (!_CheckResult(_swapChain.EndFrame(waitForGpu))) {
 		return _state;
 	}
 
-	// GraphicsContext::EndFrame 必须在 SwapChain::EndFrame 之后
-	_CheckResult(_graphicsContext.EndFrame());
+	// D3D12Context::EndFrame 必须在 SwapChain::EndFrame 之后
+	_CheckResult(_d3d12Context.EndFrame());
 	return _state;
 }
 
@@ -262,7 +267,7 @@ void Renderer::OnMsgDisplayChanged() noexcept {
 	}
 
 	// 如果正在使用 WARP 渲染则检测是否有显卡连接了
-	if (_graphicsContext.CheckForBetterAdapter()) {
+	if (_d3d12Context.CheckForBetterAdapter()) {
 		// 强制重新创建 D3D 设备
 		_state = ComponentState::DeviceLost;
 		return;
@@ -278,7 +283,7 @@ void Renderer::OnMsgDisplayChanged() noexcept {
 void Renderer::_UpdateSizeDependentResources(ID3D12GraphicsCommandList* commandList) noexcept {
 	const float squareWidth = 200.0f * _dpiScale / _size.width * 2.0f;
 	const float squareHeight = 200.0f * _dpiScale / _size.height * 2.0f;
-	alignas(64) Vertex triangleVertices[] = {
+	alignas(64) VertexPositionTexture triangleVertices[] = {
 		// 左上
 		{ { -1.0f, 1.0f }, { 0.0f, 0.0f } },
 		{ { -1.0f + squareWidth, 1.0f }, { 1.0f, 0.0f } },
@@ -312,7 +317,7 @@ void Renderer::_UpdateSizeDependentResources(ID3D12GraphicsCommandList* commandL
 
 	memcpy(_vertexUploadBufferData, triangleVertices, sizeof(triangleVertices));
 
-	if (_graphicsContext.IsGPUUploadHeapSupported()) {
+	if (_d3d12Context.IsGPUUploadHeapSupported()) {
 		if (!_isVertexBufferInitialized) {
 			// 创建时是 COMMON 状态，需一次转换
 			D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
@@ -324,7 +329,7 @@ void Renderer::_UpdateSizeDependentResources(ID3D12GraphicsCommandList* commandL
 
 			_isVertexBufferInitialized = true;
 		}
-	} else if (!_graphicsContext.IsUMA()) {
+	} else if (!_d3d12Context.IsUMA()) {
 		D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
 			_vertexBuffer.get(),
 			_isVertexBufferInitialized ? D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER : D3D12_RESOURCE_STATE_COMMON,
@@ -443,7 +448,7 @@ bool Renderer::_UpdateColorInfo() noexcept {
 		return true;
 	}
 
-	IDXGIFactory7* dxgiFactory = _graphicsContext.GetDXGIFactoryForEnumingAdapters();
+	IDXGIFactory7* dxgiFactory = _d3d12Context.GetDXGIFactoryForEnumingAdapters();
 	if (!dxgiFactory) {
 		return false;
 	}
@@ -538,7 +543,7 @@ HRESULT Renderer::_InitializePSO() noexcept {
 			0, (D3D12_ROOT_PARAMETER1*)nullptr, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
 		HRESULT hr = D3DX12SerializeVersionedRootSignature(
-			&rootSignatureDesc, _graphicsContext.GetRootSignatureVersion(), signature.put(), nullptr);
+			&rootSignatureDesc, _d3d12Context.GetRootSignatureVersion(), signature.put(), nullptr);
 		if (FAILED(hr)) {
 			return hr;
 		}
@@ -554,13 +559,13 @@ HRESULT Renderer::_InitializePSO() noexcept {
 			1, &rootParam, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
 		HRESULT hr = D3DX12SerializeVersionedRootSignature(
-			&rootSignatureDesc, _graphicsContext.GetRootSignatureVersion(), signature.put(), nullptr);
+			&rootSignatureDesc, _d3d12Context.GetRootSignatureVersion(), signature.put(), nullptr);
 		if (FAILED(hr)) {
 			return hr;
 		}
 	}
 
-	ID3D12Device5* device = _graphicsContext.GetDevice();
+	ID3D12Device5* device = _d3d12Context.GetDevice();
 
 	HRESULT hr = device->CreateRootSignature(
 		0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&_rootSignature));
@@ -569,14 +574,9 @@ HRESULT Renderer::_InitializePSO() noexcept {
 	}
 
 	// 创建 PSO
-	const D3D12_INPUT_ELEMENT_DESC inputElementDescs[] = {
-		{ "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-		{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
-	};
-
 	D3D12_SHADER_BYTECODE vsByteCode;
 	D3D12_SHADER_BYTECODE psByteCode;
-	if (_graphicsContext.IsSM6Supported()) {
+	if (_d3d12Context.IsSM6Supported()) {
 		vsByteCode = { SimpleVS, sizeof(SimpleVS) };
 
 		if (_colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange) {
@@ -604,8 +604,8 @@ HRESULT Renderer::_InitializePSO() noexcept {
 		.SampleMask = UINT_MAX,
 		.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT),
 		.InputLayout = {
-			.pInputElementDescs = inputElementDescs,
-			.NumElements = (UINT)std::size(inputElementDescs)
+			.pInputElementDescs = VertexPositionTexture::InputElements,
+			.NumElements = (UINT)std::size(VertexPositionTexture::InputElements)
 		},
 		.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
 		.NumRenderTargets = 1,

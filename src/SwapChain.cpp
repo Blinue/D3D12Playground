@@ -1,12 +1,12 @@
 #include "pch.h"
 #include "SwapChain.h"
-#include "GraphicsContext.h"
+#include "D3D12Context.h"
 #include "Win32Helper.h"
 #include <dcomp.h>
 #include <dwmapi.h>
 
 bool SwapChain::Initialize(
-	GraphicsContext& graphicContext,
+	D3D12Context& graphicContext,
 	HWND hwndAttach,
 	Size size,
 	const ColorInfo& colorInfo

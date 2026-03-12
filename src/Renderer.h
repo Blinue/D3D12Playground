@@ -1,5 +1,5 @@
 #pragma once
-#include "GraphicsContext.h"
+#include "D3D12Context.h"
 #include "SwapChain.h"
 
 class Renderer {
@@ -50,7 +50,7 @@ private:
 	Size _size{};
 	float _dpiScale = 1.0f;
 
-	GraphicsContext _graphicsContext;
+	D3D12Context _d3d12Context;
 	SwapChain _swapChain;
 
 	winrt::com_ptr<ID3D12RootSignature> _rootSignature;

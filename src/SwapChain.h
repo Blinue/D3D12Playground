@@ -1,6 +1,6 @@
 #pragma once
 
-class GraphicsContext;
+class D3D12Context;
 
 class SwapChain {
 public:
@@ -9,7 +9,7 @@ public:
 	SwapChain(SwapChain&&) = default;
 
 	bool Initialize(
-		GraphicsContext& graphicContext,
+		D3D12Context& graphicContext,
 		HWND hwndAttach,
 		Size size,
 		const ColorInfo& colorInfo
@@ -32,7 +32,7 @@ private:
 
 	HRESULT _LoadBufferResources() noexcept;
 
-	GraphicsContext* _graphicContext = nullptr;
+	D3D12Context* _graphicContext = nullptr;
 
 	winrt::com_ptr<IDXGISwapChain4> _dxgiSwapChain;
 	wil::unique_event_nothrow _frameLatencyWaitableObject;
