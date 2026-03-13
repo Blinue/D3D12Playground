@@ -28,6 +28,13 @@ jobs:
       if: matrix.compiler == 'ClangCL'
       run: msbuild D3D12Playground.slnx /restore "/p:Platform=x64;Configuration=Release;RestorePackagesConfig=true;DisablePDB=true;PlatformToolset=ClangCL"
 
+    - name: Clean
+      shell: pwsh
+      run: |
+        $binfolder = "bin\x64\Release"
+        Remove-Item "$binfolder\*.lib"
+        Remove-Item "$binfolder\*.exp"
+    
     - name: Upload build artifacts
       uses: actions/upload-artifact@v7
       with:
