@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="..\packages\Microsoft.Direct3D.DXC.1.9.2602.17\build\native\Microsoft.Direct3D.DXC.props" Condition="Exists('..\packages\Microsoft.Direct3D.DXC.1.9.2602.17\build\native\Microsoft.Direct3D.DXC.props')" />
   <Import Project="..\packages\Microsoft.Direct3D.D3D12.1.619.1\build\native\Microsoft.Direct3D.D3D12.props" Condition="Exists('..\packages\Microsoft.Direct3D.D3D12.1.619.1\build\native\Microsoft.Direct3D.D3D12.props')" />
   <Import Project="..\packages\Microsoft.Windows.CppWinRT.2.0.250303.1\build\native\Microsoft.Windows.CppWinRT.props" Condition="Exists('..\packages\Microsoft.Windows.CppWinRT.2.0.250303.1\build\native\Microsoft.Windows.CppWinRT.props')" />
   <ItemGroup Label="ProjectConfigurations">
@@ -101,6 +102,9 @@
     <ClCompile>
       <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
+    <FxCompile>
+      <AdditionalOptions>-Qembed_debug %(AdditionalOptions)</AdditionalOptions>
+    </FxCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)' == 'Release'">
     <ClCompile>
@@ -111,8 +115,8 @@
       <!-- Microsoft.Cpp.targets 而不是 Microsoft.Cpp.props 更改编译选项，将用户设置覆盖；最后，该 -->
       <!-- 属性起作用时会将 LinkTimeCodeGeneration 改为 UseFastLinkTimeCodeGeneration，而我们想要 -->
       <!-- UseLinkTimeCodeGeneration。为了精确控制编译参数，我们不使用全局 -->
-      <!-- WholeProgramOptimization，而是自己定义属性。全局 WholeProgramOptimization 影响的属性见 -->
-      <!-- $(VCTargetsPath)\Microsoft.Cpp.WholeProgramOptimization.props。 -->
+      <!-- WholeProgramOptimization，而是自己定义编译选项。全局 WholeProgramOptimization 影响的属 -->
+      <!-- 性见 $(VCTargetsPath)\Microsoft.Cpp.WholeProgramOptimization.props。 -->
       <WholeProgramOptimization>true</WholeProgramOptimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
@@ -129,6 +133,9 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
     </Link>
+    <FxCompile>
+      <AdditionalOptions>-O3 %(AdditionalOptions)</AdditionalOptions>
+    </FxCompile>
   </ItemDefinitionGroup>
   <!-- HybridCRT -->
   <Import Project="$(MSBuildThisFileDirectory)\HybridCRT.props" />
@@ -161,14 +168,6 @@
     <Manifest Include="app.manifest" />
   </ItemGroup>
   <ItemGroup>
-    <FxCompile Include="shaders\AdvancedColor_PS_SM5.hlsl">
-      <ShaderType>Pixel</ShaderType>
-      <ShaderModel>5.1</ShaderModel>
-    </FxCompile>
-    <FxCompile Include="shaders\SimpleVS_SM5.hlsl">
-      <ShaderType>Vertex</ShaderType>
-      <ShaderModel>5.1</ShaderModel>
-    </FxCompile>
     <FxCompile Include="shaders\sRGB_PS.hlsl">
       <ShaderType>Pixel</ShaderType>
     </FxCompile>
@@ -178,22 +177,40 @@
     <FxCompile Include="shaders\AdvancedColor_PS.hlsl">
       <ShaderType>Pixel</ShaderType>
     </FxCompile>
-    <FxCompile Include="shaders\sRGB_PS_SM5.hlsl">
-      <ShaderType>Pixel</ShaderType>
-      <ShaderModel>5.1</ShaderModel>
-    </FxCompile>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
-  <!-- SM6 使用 DXC 编译，需添加额外编译选项 -->
-  <Target Name="AddSM6AdditionalOptions" BeforeTargets="PrepareForBuild">
-    <ItemGroup>
-      <_SM6Shader Include="@(FxCompile)" Condition="'%(ShaderModel)' != '5.1'" />
-      <FxCompile Remove="@(_SM6Shader)" />
-      <FxCompile Include="@(_SM6Shader)">
-        <AdditionalOptions Condition="'$(Configuration)' == 'Debug'">-Qembed_debug %(_SM6Shader.AdditionalOptions)</AdditionalOptions>
-        <AdditionalOptions Condition="'$(Configuration)' == 'Release'">-O3 %(_SM6Shader.AdditionalOptions)</AdditionalOptions>
-      </FxCompile>
-    </ItemGroup>
+  <!-- 为每个着色器编译 SM5.1 版本 -->
+  <Target Name="FxCompileSM5" AfterTargets="FxCompile" Condition="'@(FxCompile)' != ''">
+    <!-- 和 FxCompile 一致，不传 ToolPath 和 AdditionalOptions 是刻意为之 -->
+    <FXC
+        Condition                       = "'%(FxCompile.ExcludedFromBuild)' != 'true'"
+        Source                          = "%(FxCompile.Identity)"
+        AdditionalIncludeDirectories    = "%(FxCompile.AdditionalIncludeDirectories)"
+        SuppressStartupBanner           = "%(FxCompile.SuppressStartupBanner)"
+        EntryPointName                  = "%(FxCompile.EntryPointName)"
+        TreatWarningAsError             = "%(FxCompile.TreatWarningAsError)"
+        ShaderType                      = "%(FxCompile.ShaderType)"
+        ShaderModel                     = "5.1"
+        AllResourcesBound               = "%(FxCompile.AllResourcesBound)"
+        EnableUnboundedDescriptorTables = "%(FxCompile.EnableUnboundedDescriptorTables)"
+        SetRootSignature                = "%(FxCompile.SetRootSignature)"
+        PreprocessorDefinitions         = "%(FxCompile.PreprocessorDefinitions)"
+        HeaderFileOutput                = "$(GeneratedFilesDir)\shaders\%(FxCompile.Filename)_SM5.h"
+        ObjectFileOutput                = "%(FxCompile.ObjectFileOutput)"
+        AssemblerOutput                 = "%(FxCompile.AssemblerOutput)"
+        AssemblerOutputFile             = "%(FxCompile.AssemblerOutputFile)"
+        VariableName                    = "%(FxCompile.Filename)_SM5"
+        DisableOptimizations            = "%(FxCompile.DisableOptimizations)"
+        EnableDebuggingInformation      = "%(FxCompile.EnableDebuggingInformation)"
+        ConsumeExportFile               = "%(FxCompile.ConsumeExportFile)"
+        ExcludedInputPaths              = "%(FxCompile.ExcludedInputPaths)"
+        ToolArchitecture                = "$(FxCompileToolArchitecture)"
+        TrackerLogDirectory             = "%(FxCompile.TrackerLogDirectory)"
+        TrackedInputFilesToIgnore       = "@(FxCompileNoDependencies)"
+        TrackedOutputFilesToIgnore      = "@(FxTrackedOutputFilesToIgnore)"
+        TrackFileAccess                 = "$(TrackFileAccess)"
+        MinimalRebuildFromTracking      = "%(FxCompile.MinimalRebuildFromTracking)"
+    />
   </Target>
   <!-- 将 d3d10warp.dll 和 d3d10warp.pdb 移动到 D3D12 文件夹-->
   <Target Name="MoveWarpDll" BeforeTargets="PrepareForBuild">
@@ -210,6 +227,7 @@
     <Import Project="..\packages\Microsoft.Windows.ImplementationLibrary.1.0.260126.7\build\native\Microsoft.Windows.ImplementationLibrary.targets" Condition="Exists('..\packages\Microsoft.Windows.ImplementationLibrary.1.0.260126.7\build\native\Microsoft.Windows.ImplementationLibrary.targets')" />
     <Import Project="..\packages\Microsoft.Direct3D.WARP.1.0.18\build\native\Microsoft.Direct3D.WARP.targets" Condition="Exists('..\packages\Microsoft.Direct3D.WARP.1.0.18\build\native\Microsoft.Direct3D.WARP.targets')" />
     <Import Project="..\packages\Microsoft.Direct3D.D3D12.1.619.1\build\native\Microsoft.Direct3D.D3D12.targets" Condition="Exists('..\packages\Microsoft.Direct3D.D3D12.1.619.1\build\native\Microsoft.Direct3D.D3D12.targets')" />
+    <Import Project="..\packages\Microsoft.Direct3D.DXC.1.9.2602.17\build\native\Microsoft.Direct3D.DXC.targets" Condition="Exists('..\packages\Microsoft.Direct3D.DXC.1.9.2602.17\build\native\Microsoft.Direct3D.DXC.targets')" />
   </ImportGroup>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
@@ -221,5 +239,7 @@
     <Error Condition="!Exists('..\packages\Microsoft.Direct3D.WARP.1.0.18\build\native\Microsoft.Direct3D.WARP.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Direct3D.WARP.1.0.18\build\native\Microsoft.Direct3D.WARP.targets'))" />
     <Error Condition="!Exists('..\packages\Microsoft.Direct3D.D3D12.1.619.1\build\native\Microsoft.Direct3D.D3D12.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Direct3D.D3D12.1.619.1\build\native\Microsoft.Direct3D.D3D12.props'))" />
     <Error Condition="!Exists('..\packages\Microsoft.Direct3D.D3D12.1.619.1\build\native\Microsoft.Direct3D.D3D12.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Direct3D.D3D12.1.619.1\build\native\Microsoft.Direct3D.D3D12.targets'))" />
+    <Error Condition="!Exists('..\packages\Microsoft.Direct3D.DXC.1.9.2602.17\build\native\Microsoft.Direct3D.DXC.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Direct3D.DXC.1.9.2602.17\build\native\Microsoft.Direct3D.DXC.props'))" />
+    <Error Condition="!Exists('..\packages\Microsoft.Direct3D.DXC.1.9.2602.17\build\native\Microsoft.Direct3D.DXC.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Direct3D.DXC.1.9.2602.17\build\native\Microsoft.Direct3D.DXC.targets'))" />
   </Target>
 </Project>
