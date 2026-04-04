@@ -317,33 +317,15 @@ void Renderer::_UpdateSizeDependentResources(ID3D12GraphicsCommandList* commandL
 
 	memcpy(_vertexUploadBufferData, triangleVertices, sizeof(triangleVertices));
 
-	if (_d3d12Context.IsGPUUploadHeapSupported()) {
-		if (!_isVertexBufferInitialized) {
-			// 创建时是 COMMON 状态，需一次转换
-			D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-				_vertexUploadBuffer.get(),
-				D3D12_RESOURCE_STATE_COMMON,
-				D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER
-			);
-			commandList->ResourceBarrier(1, &barrier);
-
-			_isVertexBufferInitialized = true;
-		}
-	} else if (!_d3d12Context.IsUMA()) {
-		D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			_vertexBuffer.get(),
-			_isVertexBufferInitialized ? D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER : D3D12_RESOURCE_STATE_COMMON,
-			D3D12_RESOURCE_STATE_COPY_DEST
-		);
-		commandList->ResourceBarrier(1, &barrier);
-
+	if (_vertexBuffer) {
 		commandList->CopyResource(_vertexBuffer.get(), _vertexUploadBuffer.get());
 
-		barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
-		barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+		D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+			_vertexBuffer.get(),
+			D3D12_RESOURCE_STATE_COPY_DEST,
+			D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER
+		);
 		commandList->ResourceBarrier(1, &barrier);
-
-		_isVertexBufferInitialized = true;
 	}
 }
 

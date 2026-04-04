@@ -67,5 +67,4 @@ private:
 	ColorInfo _colorInfo;
 
 	bool _shouldUpdateSizeDependentResources = true;
-	bool _isVertexBufferInitialized = false;
 };
