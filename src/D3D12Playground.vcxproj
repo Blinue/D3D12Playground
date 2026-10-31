@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="..\packages\Microsoft.Direct3D.D3D12.1.620.1\build\native\Microsoft.Direct3D.D3D12.props" Condition="Exists('..\packages\Microsoft.Direct3D.D3D12.1.620.1\build\native\Microsoft.Direct3D.D3D12.props')" />
   <Import Project="..\packages\Microsoft.Direct3D.DXC.1.9.2609.5\build\native\Microsoft.Direct3D.DXC.props" Condition="Exists('..\packages\Microsoft.Direct3D.DXC.1.9.2609.5\build\native\Microsoft.Direct3D.DXC.props')" />
   <Import Project="..\packages\Microsoft.Windows.CppWinRT.3.0.260818.1\build\native\Microsoft.Windows.CppWinRT.props" Condition="Exists('..\packages\Microsoft.Windows.CppWinRT.3.0.260818.1\build\native\Microsoft.Windows.CppWinRT.props')" />
-  <Import Project="..\packages\Microsoft.Direct3D.D3D12.1.619.6\build\native\Microsoft.Direct3D.D3D12.props" Condition="Exists('..\packages\Microsoft.Direct3D.D3D12.1.619.6\build\native\Microsoft.Direct3D.D3D12.props')" />
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|ARM64">
       <Configuration>Debug</Configuration>
@@ -27,7 +27,7 @@
     <CppWinRTRootNamespaceAutoMerge>true</CppWinRTRootNamespaceAutoMerge>
     <CppWinRTGenerateWindowsMetadata>true</CppWinRTGenerateWindowsMetadata>
     <CppWinRTVerbosity>low</CppWinRTVerbosity>
-    <MinimumVisualStudioVersion>17.0</MinimumVisualStudioVersion>
+    <MinimumVisualStudioVersion>18.0</MinimumVisualStudioVersion>
     <VCProjectVersion>18.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
     <ProjectGuid>{796e8432-73cf-4532-86be-886bc0f10077}</ProjectGuid>
@@ -73,17 +73,13 @@
       <!-- /utf-8: 源代码使用 UTF-8 格式 -->
       <!-- /Zc:__cplusplus: 更新 __cplusplus 宏 -->
       <!-- /volatile:iso: 禁用 volatile 的语义扩展 -->
-      <!-- /await:strict: 禁用协程的非标准语言扩展 -->
       <AdditionalOptions>/bigobj /utf-8 /Zc:__cplusplus /volatile:iso %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalOptions Condition="'$(PlatformToolset)' != 'ClangCL'">/await:strict %(AdditionalOptions)</AdditionalOptions>
       <!-- -fstrict-vtable-pointers: 缓存虚表指针，这要求不能通过非法手段改变对象的动态类型 -->
       <!-- -funsafe-math-optimizations: 以降低精度为代价提高浮点运算速度 -->
       <!-- -fno-math-errno: 浮点操作不设置 errno，这使一些数学函数可以内联 -->
       <AdditionalOptions Condition="'$(PlatformToolset)' == 'ClangCL'">/clang:-Wno-missing-designated-field-initializers /clang:-Wno-missing-field-initializers /clang:-fstrict-vtable-pointers /clang:-funsafe-math-optimizations /clang:-fno-math-errno %(AdditionalOptions)</AdditionalOptions>
       <!-- -mcx16: 启用 CX16 指令，Windows 从 8.1 开始要求 CPU 支持它 -->
       <AdditionalOptions Condition="'$(PlatformToolset)' == 'ClangCL' And '$(Platform)' == 'x64'">/clang:-mcx16 %(AdditionalOptions)</AdditionalOptions>
-      <!-- 禁用 cppwinrt 生成的头文件中的编译警告 -->
-      <AdditionalOptions Condition="'$(PlatformToolset)' == 'ClangCL'">/clang:-isystem /clang:"$(GeneratedFilesDir)\" %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -216,11 +212,106 @@
   <!-- 将 d3d10warp.dll 和 d3d10warp.pdb 移动到 D3D12 文件夹-->
   <Target Name="MoveWarpDll" BeforeTargets="PrepareForBuild">
     <ItemGroup>
-      <_Warp Include="@(Content)" Condition="'%(Filename)' == 'd3d10warp'" />
-      <Content Remove="@(_Warp)" />
-      <Content Include="@(_Warp)">
-        <Link>D3D12\%(FileName)%(Extension)</Link>
+      <Content Condition="'%(Filename)' == 'd3d10warp'">
+        <Link>app\D3D12\%(FileName)%(Extension)</Link>
       </Content>
+    </ItemGroup>
+  </Target>
+  <!-- 从 ClCompile.AdditionalIncludeDirectories 中提取出外部包含目录并为 AdditionalOptions -->
+  <!-- 追加 /external:I 参数。这使得编译器和代码分析工具忽略外部头文件中的警告。 -->
+  <UsingTask TaskName="AddExternalIncludeOptionsTask" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <ClCompile ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="true" />
+      <UserSourceDir Required="true" />
+      <ProjectDir Required="true" />
+      <ClCompileWithExternalIncludeOptions ParameterType="Microsoft.Build.Framework.ITaskItem[]" Output="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System" />
+      <Using Namespace="System.Collections.Generic" />
+      <Using Namespace="System.IO" />
+      <Using Namespace="System.Text" />
+      <Using Namespace="Microsoft.Build.Framework" />
+      <Using Namespace="Microsoft.Build.Utilities" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+string NormalizeDir(string dir) {
+    if (!Path.IsPathRooted(dir)) {
+        dir = Path.Combine(ProjectDir, dir);
+    }
+
+    dir = Path.GetFullPath(dir);
+
+    // 末尾添加目录分隔符使得可以使用 StartsWith 判断是否是子文件夹
+    if (!dir.EndsWith("\\")) {
+        dir += "\\";
+    }
+
+    return dir;
+}
+
+string nUserSourceDir = NormalizeDir(UserSourceDir);
+
+string GenerateExternalIncludeOptions(string additionalIncludeDirectories) {
+    StringBuilder stringBuilder = new();
+
+    foreach (string includeDir in additionalIncludeDirectories.Split(';')) {
+        string trimmedDir = includeDir.Trim();
+        if (trimmedDir.Length == 0) {
+            continue;
+        }
+
+        string nIncludeDir = NormalizeDir(trimmedDir);
+        // 不在用户代码目录就视为外部包含目录
+        if (!nIncludeDir.StartsWith(nUserSourceDir, StringComparison.OrdinalIgnoreCase)) {
+            if (stringBuilder.Length > 0) {
+                stringBuilder.Append(' ');
+            }
+
+            // 命令行参数中移除末尾的目录分隔符，否则无法正确解析
+            nIncludeDir = nIncludeDir.Substring(0, nIncludeDir.Length - 1);
+            stringBuilder.Append("/external:I\"").Append(nIncludeDir).Append('"');
+        }
+    }
+
+    return stringBuilder.ToString();
+}
+
+List<ITaskItem> outputItems = new();
+
+// 为每个 ClCompile 条目生成 /external:I 参数
+foreach (ITaskItem clCompileItem in ClCompile) {
+    // 复制 clCompileItem
+    ITaskItem outputItem = new TaskItem(clCompileItem);
+
+    string externalIncludeOptions = GenerateExternalIncludeOptions(
+        outputItem.GetMetadata("AdditionalIncludeDirectories"));
+    if (!string.IsNullOrEmpty(externalIncludeOptions)) {
+        // 将新参数追加到 AdditionalOptions
+        string additionalOptions = outputItem.GetMetadata("AdditionalOptions");
+
+        if (string.IsNullOrEmpty(additionalOptions)) {
+            additionalOptions = externalIncludeOptions;
+        } else {
+            additionalOptions += " " + externalIncludeOptions;
+        }
+
+        outputItem.SetMetadata("AdditionalOptions", additionalOptions);
+    }
+
+    outputItems.Add(outputItem);
+}
+
+ClCompileWithExternalIncludeOptions = outputItems.ToArray();
+      ]]></Code>
+    </Task>
+  </UsingTask>
+  <Target Name="AddExternalIncludeOptions" BeforeTargets="ClCompile">
+    <AddExternalIncludeOptionsTask ClCompile="@(ClCompile)" UserSourceDir="$(SolutionDir)\src" ProjectDir="$(ProjectDir)">
+      <Output TaskParameter="ClCompileWithExternalIncludeOptions" ItemName="_ClCompileWithExternalIncludeOptions" />
+    </AddExternalIncludeOptionsTask>
+    <ItemGroup>
+      <ClCompile Remove="@(ClCompile)" />
+      <ClCompile Include="@(_ClCompileWithExternalIncludeOptions)" />
     </ItemGroup>
   </Target>
   <!-- 禁用 PDB 时防止复制依赖包含的 PDB，如 D3D12Core.pdb -->
@@ -231,22 +322,22 @@
   </Target>
   <ImportGroup Label="ExtensionTargets">
     <Import Project="..\packages\Microsoft.Windows.ImplementationLibrary.1.0.260126.7\build\native\Microsoft.Windows.ImplementationLibrary.targets" Condition="Exists('..\packages\Microsoft.Windows.ImplementationLibrary.1.0.260126.7\build\native\Microsoft.Windows.ImplementationLibrary.targets')" />
-    <Import Project="..\packages\Microsoft.Direct3D.D3D12.1.619.6\build\native\Microsoft.Direct3D.D3D12.targets" Condition="Exists('..\packages\Microsoft.Direct3D.D3D12.1.619.6\build\native\Microsoft.Direct3D.D3D12.targets')" />
-    <Import Project="..\packages\Microsoft.Direct3D.WARP.1.0.21\build\native\Microsoft.Direct3D.WARP.targets" Condition="Exists('..\packages\Microsoft.Direct3D.WARP.1.0.21\build\native\Microsoft.Direct3D.WARP.targets')" />
     <Import Project="..\packages\Microsoft.Windows.CppWinRT.3.0.260818.1\build\native\Microsoft.Windows.CppWinRT.targets" Condition="Exists('..\packages\Microsoft.Windows.CppWinRT.3.0.260818.1\build\native\Microsoft.Windows.CppWinRT.targets')" />
     <Import Project="..\packages\Microsoft.Direct3D.DXC.1.9.2609.5\build\native\Microsoft.Direct3D.DXC.targets" Condition="Exists('..\packages\Microsoft.Direct3D.DXC.1.9.2609.5\build\native\Microsoft.Direct3D.DXC.targets')" />
+    <Import Project="..\packages\Microsoft.Direct3D.D3D12.1.620.1\build\native\Microsoft.Direct3D.D3D12.targets" Condition="Exists('..\packages\Microsoft.Direct3D.D3D12.1.620.1\build\native\Microsoft.Direct3D.D3D12.targets')" />
+    <Import Project="..\packages\Microsoft.Direct3D.WARP.1.0.22\build\native\Microsoft.Direct3D.WARP.targets" Condition="Exists('..\packages\Microsoft.Direct3D.WARP.1.0.22\build\native\Microsoft.Direct3D.WARP.targets')" />
   </ImportGroup>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
       <ErrorText>这台计算机上缺少此项目引用的 NuGet 程序包。使用“NuGet 程序包还原”可下载这些程序包。有关更多信息，请参见 http://go.microsoft.com/fwlink/?LinkID=322105。缺少的文件是 {0}。</ErrorText>
     </PropertyGroup>
     <Error Condition="!Exists('..\packages\Microsoft.Windows.ImplementationLibrary.1.0.260126.7\build\native\Microsoft.Windows.ImplementationLibrary.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Windows.ImplementationLibrary.1.0.260126.7\build\native\Microsoft.Windows.ImplementationLibrary.targets'))" />
-    <Error Condition="!Exists('..\packages\Microsoft.Direct3D.D3D12.1.619.6\build\native\Microsoft.Direct3D.D3D12.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Direct3D.D3D12.1.619.6\build\native\Microsoft.Direct3D.D3D12.props'))" />
-    <Error Condition="!Exists('..\packages\Microsoft.Direct3D.D3D12.1.619.6\build\native\Microsoft.Direct3D.D3D12.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Direct3D.D3D12.1.619.6\build\native\Microsoft.Direct3D.D3D12.targets'))" />
-    <Error Condition="!Exists('..\packages\Microsoft.Direct3D.WARP.1.0.21\build\native\Microsoft.Direct3D.WARP.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Direct3D.WARP.1.0.21\build\native\Microsoft.Direct3D.WARP.targets'))" />
     <Error Condition="!Exists('..\packages\Microsoft.Windows.CppWinRT.3.0.260818.1\build\native\Microsoft.Windows.CppWinRT.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Windows.CppWinRT.3.0.260818.1\build\native\Microsoft.Windows.CppWinRT.props'))" />
     <Error Condition="!Exists('..\packages\Microsoft.Windows.CppWinRT.3.0.260818.1\build\native\Microsoft.Windows.CppWinRT.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Windows.CppWinRT.3.0.260818.1\build\native\Microsoft.Windows.CppWinRT.targets'))" />
     <Error Condition="!Exists('..\packages\Microsoft.Direct3D.DXC.1.9.2609.5\build\native\Microsoft.Direct3D.DXC.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Direct3D.DXC.1.9.2609.5\build\native\Microsoft.Direct3D.DXC.props'))" />
     <Error Condition="!Exists('..\packages\Microsoft.Direct3D.DXC.1.9.2609.5\build\native\Microsoft.Direct3D.DXC.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Direct3D.DXC.1.9.2609.5\build\native\Microsoft.Direct3D.DXC.targets'))" />
+    <Error Condition="!Exists('..\packages\Microsoft.Direct3D.D3D12.1.620.1\build\native\Microsoft.Direct3D.D3D12.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Direct3D.D3D12.1.620.1\build\native\Microsoft.Direct3D.D3D12.props'))" />
+    <Error Condition="!Exists('..\packages\Microsoft.Direct3D.D3D12.1.620.1\build\native\Microsoft.Direct3D.D3D12.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Direct3D.D3D12.1.620.1\build\native\Microsoft.Direct3D.D3D12.targets'))" />
+    <Error Condition="!Exists('..\packages\Microsoft.Direct3D.WARP.1.0.22\build\native\Microsoft.Direct3D.WARP.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Direct3D.WARP.1.0.22\build\native\Microsoft.Direct3D.WARP.targets'))" />
   </Target>
 </Project>

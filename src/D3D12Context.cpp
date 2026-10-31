@@ -24,7 +24,7 @@ bool D3D12Context::Initialize(uint32_t maxInFlightFrameCount) noexcept {
 	// 检查根签名版本
 	{
 		D3D12_FEATURE_DATA_ROOT_SIGNATURE data = { .HighestVersion = D3D_ROOT_SIGNATURE_VERSION_1_1 };
-		if (SUCCEEDED(_device->CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &data, sizeof(data)))) {
+		if (SUCCEEDED(CheckFeatureSupport(D3D12_FEATURE_ROOT_SIGNATURE, &data, sizeof(data)))) {
 			_rootSignatureVersion = data.HighestVersion;
 		}
 	}
@@ -32,7 +32,7 @@ bool D3D12Context::Initialize(uint32_t maxInFlightFrameCount) noexcept {
 	// 检查是否是集成显卡
 	{
 		D3D12_FEATURE_DATA_ARCHITECTURE1 data{};
-		if (SUCCEEDED(_device->CheckFeatureSupport(D3D12_FEATURE_ARCHITECTURE1, &data, sizeof(data)))) {
+		if (SUCCEEDED(CheckFeatureSupport(D3D12_FEATURE_ARCHITECTURE1, &data, sizeof(data)))) {
 			_isUMA = data.UMA;
 		}
 	}
@@ -44,7 +44,7 @@ bool D3D12Context::Initialize(uint32_t maxInFlightFrameCount) noexcept {
 	// 检查 Resizable BAR 支持
 	{
 		D3D12_FEATURE_DATA_D3D12_OPTIONS16 data{};
-		if (SUCCEEDED(_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS16, &data, sizeof(data)))) {
+		if (SUCCEEDED(CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS16, &data, sizeof(data)))) {
 			_isGPUUploadHeapSupported = data.GPUUploadHeapSupported;
 		}
 	}
@@ -52,7 +52,7 @@ bool D3D12Context::Initialize(uint32_t maxInFlightFrameCount) noexcept {
 	// 检查 shader model 6.0 支持
 	{
 		D3D12_FEATURE_DATA_SHADER_MODEL data = { .HighestShaderModel = D3D_SHADER_MODEL_6_0 };
-		if (SUCCEEDED(_device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &data, sizeof(data)))) {
+		if (SUCCEEDED(CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &data, sizeof(data)))) {
 			_isSM6Supported = data.HighestShaderModel == D3D_SHADER_MODEL_6_0;
 		}
 	}
@@ -98,6 +98,20 @@ IDXGIFactory7* D3D12Context::GetDXGIFactoryForEnumingAdapters() noexcept {
 	}
 
 	return _dxgiFactory.get();
+}
+
+HRESULT D3D12Context::CheckFeatureSupport(
+	D3D12_FEATURE feature,
+	void* pFeatureSupportData,
+	UINT featureSupportDataSize
+) const noexcept {
+	// ID3D12Device::CheckFeatureSupport 已废弃，调试层会产生警告
+	if (_device16) {
+		return _device16->CheckFeatureSupport1(
+			feature, pFeatureSupportData, featureSupportDataSize, D3D12_SDK_VERSION);
+	} else {
+		return _device->CheckFeatureSupport(feature, pFeatureSupportData, featureSupportDataSize);
+	}
 }
 
 HRESULT D3D12Context::Signal(uint64_t& fenceValue) noexcept {
@@ -243,6 +257,7 @@ bool D3D12Context::_CreateD3DDevice() noexcept {
 			D3D_FEATURE_LEVEL_11_0,
 			IID_PPV_ARGS(&_device)
 		))) {
+			_device16 = _device.try_as<ID3D12Device16>();
 			_isWarp = false;
 			return true;
 		}

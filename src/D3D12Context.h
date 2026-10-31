@@ -50,6 +50,12 @@ public:
 		return (uint32_t)_commandAllocators.size();
 	}
 
+	HRESULT CheckFeatureSupport(
+		D3D12_FEATURE feature,
+		void* pFeatureSupportData,
+		UINT featureSupportDataSize
+	) const noexcept;
+
 	HRESULT Signal(uint64_t& fenceValue) noexcept;
 
 	HRESULT WaitForFenceValue(uint64_t fenceValue) noexcept;
@@ -69,6 +75,7 @@ private:
 
 	winrt::com_ptr<IDXGIFactory7> _dxgiFactory;
 	winrt::com_ptr<ID3D12Device5> _device;
+	winrt::com_ptr<ID3D12Device16> _device16;
 	winrt::com_ptr<ID3D12CommandQueue> _commandQueue;
 
 	std::vector<winrt::com_ptr<ID3D12CommandAllocator>> _commandAllocators;
