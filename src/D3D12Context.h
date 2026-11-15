@@ -50,6 +50,10 @@ public:
 		return (uint32_t)_commandAllocators.size();
 	}
 
+	const std::wstring& GetAdapterDesc() const noexcept {
+		return _adapterDesc;
+	}
+
 	HRESULT CheckFeatureSupport(
 		D3D12_FEATURE feature,
 		void* pFeatureSupportData,
@@ -71,7 +75,7 @@ public:
 private:
 	HRESULT _CreateDXGIFactory() noexcept;
 
-	bool _CreateD3DDevice() noexcept;
+	bool _CreateD3DDevice(winrt::com_ptr<IDXGIAdapter1>& adapter) noexcept;
 
 	winrt::com_ptr<IDXGIFactory7> _dxgiFactory;
 	winrt::com_ptr<ID3D12Device5> _device;
@@ -88,6 +92,8 @@ private:
 	uint32_t _curFrameIndex = 0;
 
 	D3D_ROOT_SIGNATURE_VERSION _rootSignatureVersion = D3D_ROOT_SIGNATURE_VERSION_1_0;
+
+	std::wstring _adapterDesc;
 
 	bool _isWarp = false;
 	bool _isUMA = false;

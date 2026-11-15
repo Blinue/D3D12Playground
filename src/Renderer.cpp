@@ -506,15 +506,19 @@ HRESULT Renderer::_UpdateColorSpace() noexcept {
 }
 
 void Renderer::_UpdateWindowTitle() const noexcept {
-	const wchar_t* title;
+	std::wstring title = L"D3D12Playground | ";
+	title += _d3d12Context.GetAdapterDesc();
+	title += L" | ";
+
 	if (_colorInfo.kind == winrt::AdvancedColorKind::StandardDynamicRange) {
-		title = L"D3D12Playground | SDR";
+		title += L"SDR";
 	} else if (_colorInfo.kind == winrt::AdvancedColorKind::WideColorGamut) {
-		title = L"D3D12Playground | WCG";
+		title += L"WCG";
 	} else {
-		title = L"D3D12Playground | HDR";
+		title += L"HDR";
 	}
-	SetWindowText(_hwndMain, title);
+
+	SetWindowText(_hwndMain, title.c_str());
 }
 
 HRESULT Renderer::_InitializePSO() noexcept {

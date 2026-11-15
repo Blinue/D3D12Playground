@@ -8,10 +8,22 @@ bool D3D12Context::Initialize(uint32_t maxInFlightFrameCount) noexcept {
 		return false;
 	}
 
-	if (!_CreateD3DDevice()) {
-		return false;
+	{
+		winrt::com_ptr<IDXGIAdapter1> adapter;
+		if (!_CreateD3DDevice(adapter)) {
+			return false;
+		}
+
+		DXGI_ADAPTER_DESC adapterDesc;
+		if (SUCCEEDED(adapter->GetDesc(&adapterDesc))) {
+			_adapterDesc = adapterDesc.Description;
+		} else {
+			_adapterDesc = L"UNKNOWN";
+		}
 	}
 
+	_device16 = _device.try_as<ID3D12Device16>();
+	
 #ifdef _DEBUG
 	// 调试层汇报错误或警告时中断
 	if (winrt::com_ptr<ID3D12InfoQueue> infoQueue = _device.try_as<ID3D12InfoQueue>()) {
@@ -239,9 +251,8 @@ static void FixD3D10WarpDll(IDXGIAdapter1* warpAdapter) noexcept {
 	}
 }
 
-bool D3D12Context::_CreateD3DDevice() noexcept {
+bool D3D12Context::_CreateD3DDevice(winrt::com_ptr<IDXGIAdapter1>& adapter) noexcept {
 	// 枚举查找第一个支持 D3D12 的显卡
-	winrt::com_ptr<IDXGIAdapter1> adapter;
 	for (UINT adapterIdx = 0;
 		SUCCEEDED(_dxgiFactory->EnumAdapters1(adapterIdx, adapter.put()));
 		++adapterIdx
@@ -257,7 +268,6 @@ bool D3D12Context::_CreateD3DDevice() noexcept {
 			D3D_FEATURE_LEVEL_11_0,
 			IID_PPV_ARGS(&_device)
 		))) {
-			_device16 = _device.try_as<ID3D12Device16>();
 			_isWarp = false;
 			return true;
 		}
